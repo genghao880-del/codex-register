@@ -1,0 +1,6 @@
+*.json
+!gui_config.json
+*.log
+.idea
+.cursor
+__pycache__/

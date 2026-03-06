@@ -1,0 +1,8 @@
+{
+  "proxy": "",
+  "sleep_min": 5,
+  "sleep_max": 10,
+  "once_mode": true,
+  "output_dir": "E:\\Desktop\\注册机",
+  "thread_count": 3
+}
