@@ -17,7 +17,10 @@ cp gui_config.example.json gui_config.json
 
 2. 修改 `gui_config.json`（至少要填邮箱服务和管理端 API）
 3. 启动面板后也可在 UI 里继续调整，配置会自动回写到 `gui_config.json`
-
+4. 启动面板 
+```bash 
+python gui.py
+``` 
 ## 完整配置项说明
 
 以下字段与 `gui_config_store.py` 的 `DEFAULT_CONFIG` 一致。
@@ -70,9 +73,9 @@ cp gui_config.example.json gui_config.json
 
 | 键名 | 类型 | 默认值 | 说明 |
 |---|---|---:|---|
-| `accounts_sync_api_url` | string | `"https://one.ytb.icu/api/v1/admin/accounts/data"` | 本地账号同步到管理端的接口 |
-| `accounts_sync_bearer_token` | string | `""` | 管理端 Bearer Token |
-| `accounts_list_api_base` | string | `"https://one.ytb.icu/api/v1/admin/accounts"` | 管理端列表基地址 |
+| `accounts_sync_api_url` | string | `"https://example.your.domain/api/v1/admin/accounts/data"` | 本地账号同步到管理端的接口 |
+| `accounts_sync_bearer_token` | string | `""` | 管理端 Bearer Token,网页端F12在网络tab找接口获取 |
+| `accounts_list_api_base` | string | `"https://example.your.domain/api/v1/admin/accounts"` | 管理端列表基地址 |
 | `accounts_list_page_size` | int | `10` | 每页条数（当前实现固定按 10 读取） |
 | `accounts_list_fetch_workers` | int | `4` | 并发拉取列表页线程数 |
 | `accounts_list_ssl_retry` | int | `3` | 列表/额度接口 SSL 重试次数 |
