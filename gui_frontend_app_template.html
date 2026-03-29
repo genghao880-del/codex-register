@@ -284,6 +284,9 @@
                         <n-tab-pane name="mailfree" tab="MailFree">
                           <span style="display:none"></span>
                         </n-tab-pane>
+                        <n-tab-pane name="gmail" tab="Gmail IMAP">
+                          <span style="display:none"></span>
+                        </n-tab-pane>
                         <n-tab-pane name="graph" tab="Microsoft Graph">
                           <span style="display:none"></span>
                         </n-tab-pane>
@@ -313,6 +316,46 @@
                           :step="1"
                           style="width: 140px"
                         />
+                      </div>
+                      <div v-else-if="mailProviderTab === 'gmail'" class="toolbar" style="margin-top: 10px">
+                        <n-input
+                          class="toolbar-path"
+                          v-model:value="settingsForm.gmail_imap_user"
+                          placeholder="Gmail IMAP 账号（例如 yourname@gmail.com）"
+                        />
+                        <n-input
+                          class="toolbar-path"
+                          v-model:value="settingsForm.gmail_imap_pass"
+                          type="password"
+                          show-password-on="click"
+                          placeholder="Gmail 应用专用密码（16位）"
+                        />
+                        <n-input
+                          class="toolbar-path"
+                          v-model:value="settingsForm.gmail_alias_emails"
+                          placeholder="别名主邮箱池（逗号/空格分隔，可留空默认用 IMAP 账号）"
+                        />
+                        <n-input
+                          class="toolbar-path"
+                          v-model:value="settingsForm.gmail_imap_server"
+                          placeholder="IMAP 服务器（默认 imap.gmail.com）"
+                        />
+                        <n-input-number
+                          v-model:value="settingsForm.gmail_imap_port"
+                          :min="1"
+                          :max="65535"
+                          :step="1"
+                          style="width: 140px"
+                        />
+                        <n-input-number
+                          v-model:value="settingsForm.gmail_alias_tag_len"
+                          :min="1"
+                          :max="64"
+                          :step="1"
+                          style="width: 140px"
+                        />
+                        <n-switch v-model:value="settingsForm.gmail_alias_mix_googlemail" />
+                        <span class="meta">混用 gmail/googlemail 域名</span>
                       </div>
                       <div v-else class="toolbar" style="margin-top: 10px">
                         <input
@@ -354,6 +397,10 @@
                         >删除当前文件</n-button>
                         <n-button class="toolbar-btn" :loading="loading.graph_files" @click="refreshGraphAccountFiles(true)">刷新文件列表</n-button>
                       </div>
+                      <div v-if="mailProviderTab === 'gmail'" class="meta" style="margin-top: 6px">
+                        Gmail 必须开启 IMAP 并使用应用专用密码；支持按别名池自动生成 <code>user+tag@gmail.com</code>。
+                      </div>
+                      <div v-if="mailProviderTab === 'gmail'" class="meta" style="margin-top: 4px">{{ gmailAliasPreviewText }}</div>
                       <div v-if="mailProviderTab === 'graph'" class="meta" style="margin-top: 6px">
                         文件格式要求：每行必须为 <code>邮箱----密码----client_id----令牌</code>（共 4 段，使用四个中划线分隔）。
                       </div>

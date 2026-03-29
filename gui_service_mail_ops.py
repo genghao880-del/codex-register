@@ -22,7 +22,7 @@ def mail_proxy(service) -> dict[str, str] | None:
     return {"http": raw, "https": raw}
 
 
-def mail_client_signature(service) -> tuple[str, str, str, str, bool, str, str, str]:
+def mail_client_signature(service) -> tuple[Any, ...]:
     provider = normalize_mail_provider(service.cfg.get("mail_service_provider") or "mailfree")
     domain = str(service.cfg.get("worker_domain") or "").strip()
     if domain and not domain.startswith("http"):
@@ -30,6 +30,13 @@ def mail_client_signature(service) -> tuple[str, str, str, str, bool, str, str, 
     graph_accounts_file = str(service.cfg.get("graph_accounts_file") or "").strip()
     graph_tenant = str(service.cfg.get("graph_tenant") or "common").strip()
     graph_fetch_mode = str(service.cfg.get("graph_fetch_mode") or "graph_api").strip()
+    gmail_imap_user = str(service.cfg.get("gmail_imap_user") or "").strip()
+    gmail_imap_pass = str(service.cfg.get("gmail_imap_pass") or "")
+    gmail_alias_emails = str(service.cfg.get("gmail_alias_emails") or "").strip()
+    gmail_imap_server = str(service.cfg.get("gmail_imap_server") or "imap.gmail.com").strip()
+    gmail_imap_port = service._to_int(service.cfg.get("gmail_imap_port"), 993, 1, 65535)
+    gmail_alias_tag_len = service._to_int(service.cfg.get("gmail_alias_tag_len"), 8, 1, 64)
+    gmail_alias_mix_googlemail = bool(service.cfg.get("gmail_alias_mix_googlemail", True))
     return (
         provider,
         domain.rstrip("/"),
@@ -39,6 +46,13 @@ def mail_client_signature(service) -> tuple[str, str, str, str, bool, str, str, 
         graph_accounts_file,
         graph_tenant,
         graph_fetch_mode,
+        gmail_imap_user,
+        gmail_imap_pass,
+        gmail_alias_emails,
+        gmail_imap_server,
+        gmail_imap_port,
+        gmail_alias_tag_len,
+        gmail_alias_mix_googlemail,
     )
 
 
@@ -50,10 +64,33 @@ def get_mail_client(service):
     if cached is not None and cached_sig == sig:
         return cached
 
-    provider, base_url, username, password, verify_ssl, graph_accounts_file, graph_tenant, graph_fetch_mode = sig
+    (
+        provider,
+        base_url,
+        username,
+        password,
+        verify_ssl,
+        graph_accounts_file,
+        graph_tenant,
+        graph_fetch_mode,
+        gmail_imap_user,
+        gmail_imap_pass,
+        gmail_alias_emails,
+        gmail_imap_server,
+        gmail_imap_port,
+        gmail_alias_tag_len,
+        gmail_alias_mix_googlemail,
+    ) = sig
     os.environ["GRAPH_ACCOUNTS_FILE"] = graph_accounts_file
     os.environ["GRAPH_TENANT"] = graph_tenant
     os.environ["GRAPH_FETCH_MODE"] = graph_fetch_mode
+    os.environ["GMAIL_IMAP_USER"] = gmail_imap_user
+    os.environ["GMAIL_IMAP_PASS"] = gmail_imap_pass
+    os.environ["GMAIL_ALIAS_EMAILS"] = gmail_alias_emails
+    os.environ["GMAIL_IMAP_SERVER"] = gmail_imap_server
+    os.environ["GMAIL_IMAP_PORT"] = str(gmail_imap_port)
+    os.environ["GMAIL_ALIAS_TAG_LEN"] = str(gmail_alias_tag_len)
+    os.environ["GMAIL_ALIAS_MIX_GOOGLEMAIL"] = "1" if gmail_alias_mix_googlemail else "0"
     try:
         client = build_mail_service(
             provider,

@@ -40,6 +40,13 @@ DEFAULT_CONFIG = {
     "graph_tenant": "common",
     "graph_fetch_mode": "graph_api",
     "graph_pre_refresh_before_run": True,
+    "gmail_imap_user": "",
+    "gmail_imap_pass": "",
+    "gmail_alias_emails": "",
+    "gmail_imap_server": "imap.gmail.com",
+    "gmail_imap_port": 993,
+    "gmail_alias_tag_len": 8,
+    "gmail_alias_mix_googlemail": True,
     "hero_sms_enabled": False,
     "hero_sms_api_key": "",
     "hero_sms_service": "",
@@ -107,6 +114,26 @@ def load_config() -> dict[str, Any]:
         cfg["worker_domain"] = env.get("WORKER_DOMAIN", "") or MAILFREE_DEFAULT_BASE_URL
         cfg["freemail_username"] = env.get("FREEMAIL_USERNAME", "")
         cfg["freemail_password"] = env.get("FREEMAIL_PASSWORD", "")
+        cfg["gmail_imap_user"] = env.get("GMAIL_IMAP_USER", env.get("IMAP_USER", ""))
+        cfg["gmail_imap_pass"] = env.get("GMAIL_IMAP_PASS", env.get("IMAP_PASS", ""))
+        cfg["gmail_alias_emails"] = env.get("GMAIL_ALIAS_EMAILS", env.get("EMAIL_LIST", ""))
+        cfg["gmail_imap_server"] = (
+            env.get("GMAIL_IMAP_SERVER", env.get("IMAP_SERVER", "imap.gmail.com"))
+            or "imap.gmail.com"
+        )
+        try:
+            cfg["gmail_imap_port"] = int(env.get("GMAIL_IMAP_PORT", "993") or 993)
+        except Exception:
+            cfg["gmail_imap_port"] = 993
+        try:
+            cfg["gmail_alias_tag_len"] = int(
+                env.get("GMAIL_ALIAS_TAG_LEN", env.get("TAG_LENGTH", env.get("GMAIL_TAG_LEN", "8")))
+                or 8
+            )
+        except Exception:
+            cfg["gmail_alias_tag_len"] = 8
+        mix_v = env.get("GMAIL_ALIAS_MIX_GOOGLEMAIL", "1").strip().lower()
+        cfg["gmail_alias_mix_googlemail"] = mix_v not in ("0", "false", "no")
         ssl_v = env.get("OPENAI_SSL_VERIFY", "1").strip().lower()
         cfg["openai_ssl_verify"] = ssl_v not in ("0", "false", "no")
         skip_v = env.get("SKIP_NET_CHECK", "0").strip().lower()

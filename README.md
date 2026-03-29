@@ -24,7 +24,7 @@ CodeX Register 是一个桌面化的 Web 控制台，用于统一管理注册流
 ## 功能概览
 
 - 统一工作台：开始/停止任务、实时日志、重试原因、成功率、SMS 花费与余额统计。
-- 邮箱体系：支持 MailFree 与 Microsoft Graph 两种模式，支持 Graph 文件导入、轮询与 token 刷新。
+- 邮箱体系：支持 MailFree、Gmail IMAP 与 Microsoft Graph，支持 Graph 文件导入、轮询与 token 刷新。
 - SMS 管理：支持 HeroSMS 余额检查、国家下拉（含价格/库存）、国家过滤、手机号复用、自动国家优选。
 - 代理能力：支持固定 HTTP 代理与 FlClash 动态切节点（含延迟探测、批次共享节点、自动过滤不可用节点）。
 - 数据管理：本地 `accounts_*.json` 与 `accounts.txt` 汇总、备注、导出、同步远端。
@@ -89,7 +89,7 @@ python gui.py --mode browser --no-auto-open
 
 - `工作台`：任务控制、实时统计（含 SMS 消耗/余额/阈值）。
 - `数据`：本地 JSON 与账户列表、远端同步/复活/删除。
-- `邮箱设置`：MailFree 与 Graph 设置、Graph 文件导入与收件检查。
+- `邮箱设置`：MailFree / Gmail IMAP / Graph 设置，支持 Graph 文件导入与收件检查。
 - `SMS管理`：HeroSMS 开关、API Key、服务代码、国家价格下拉、余额刷新。
 - `服务设置`：并发、冷却、重试、网络与指纹相关配置。
 - `代理服务`：FlClash 配置与节点探测。
@@ -135,14 +135,21 @@ python gui.py --mode browser --no-auto-open
 | `flclash_delay_max_ms` | int | `1800` | 可用延迟阈值 |
 | `flclash_delay_retry` | int | `1` | 单节点延迟探测重试次数 |
 
-### 3) 邮箱服务（[MailFree](https://github.com/Msg-Lbo/mailfree) / [Graph](https://learn.microsoft.com/zh-cn/graph/use-the-api)）
+### 3) 邮箱服务（[MailFree](https://github.com/Msg-Lbo/mailfree) / Gmail IMAP / [Graph](https://learn.microsoft.com/zh-cn/graph/use-the-api)）
 
 | 键名 | 类型 | 默认值 | 说明 |
 |---|---|---:|---|
-| `mail_service_provider` | string | `"mailfree"` | `mailfree` / `graph` |
+| `mail_service_provider` | string | `"mailfree"` | `mailfree` / `gmail` / `graph` |
 | `worker_domain` | string | `""` | MailFree 服务基地址 |
 | `freemail_username` | string | `""` | MailFree 用户名 |
 | `freemail_password` | string | `""` | MailFree 密码 |
+| `gmail_imap_user` | string | `""` | Gmail IMAP 登录账号（建议 Gmail 主号） |
+| `gmail_imap_pass` | string | `""` | Gmail 应用专用密码（16 位） |
+| `gmail_alias_emails` | string | `""` | 别名主邮箱池，逗号/空格分隔（留空默认用 `gmail_imap_user`） |
+| `gmail_imap_server` | string | `"imap.gmail.com"` | IMAP 服务器地址 |
+| `gmail_imap_port` | int | `993` | IMAP SSL 端口 |
+| `gmail_alias_tag_len` | int | `8` | Gmail 别名 tag 长度（`user+tag@gmail.com`） |
+| `gmail_alias_mix_googlemail` | bool | `true` | 是否混用 `gmail.com`/`googlemail.com` 后缀 |
 | `graph_accounts_file` | string | `""` | Graph 账号文件路径 |
 | `graph_tenant` | string | `"common"` | Graph tenant |
 | `graph_fetch_mode` | string | `"graph_api"` | `graph_api` / `imap_xoauth2` |
@@ -259,6 +266,7 @@ bob@outlook.com----pass456----yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy----0.AXEA...
 
 - `invalid_auth_step` 频繁：通常是链路状态/风控波动，优先降低并发、开启随机指纹、提高代理质量。
 - 点击开始提示“配置未完成”：先按工作台红色提示补齐必填项（例如 MailFree 凭据、Graph 文件、FlClash 关键字段）。
+- Gmail IMAP 登录失败：确认 Gmail 已开启 IMAP，并使用 16 位应用专用密码而非账号登录密码。
 - `NO_BALANCE`：HeroSMS 余额不足，充值或提高阈值策略后重试。
 - 长时间卡在等码：检查国家库存、切换国家或开启自动优选国家。
 - `window` 模式打不开：安装 WebView2 Runtime，或先用 `--mode browser`。

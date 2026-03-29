@@ -705,6 +705,14 @@ class RegisterService:
         freemail_user = str(cfg.get("freemail_username") or "").strip()
         freemail_pass = str(cfg.get("freemail_password") or "").strip()
         graph_file = str(cfg.get("graph_accounts_file") or "").strip()
+        gmail_user = str(cfg.get("gmail_imap_user") or "").strip()
+        gmail_pass = str(cfg.get("gmail_imap_pass") or "").strip()
+        gmail_aliases_raw = str(cfg.get("gmail_alias_emails") or "").strip()
+        gmail_aliases = [
+            x
+            for x in re.split(r"[\n\r,;\s]+", gmail_aliases_raw)
+            if str(x or "").strip()
+        ]
 
         if provider == "mailfree":
             if not worker_domain:
@@ -713,6 +721,13 @@ class RegisterService:
                 blockers.append("MailFree 用户名未填写（freemail_username）")
             if not freemail_pass:
                 blockers.append("MailFree 密码未填写（freemail_password）")
+        elif provider == "gmail":
+            if not gmail_user:
+                blockers.append("Gmail IMAP 账号未填写（gmail_imap_user）")
+            if not gmail_pass:
+                blockers.append("Gmail IMAP 应用专用密码未填写（gmail_imap_pass）")
+            if not gmail_aliases:
+                warnings.append("Gmail 别名池为空，将默认使用 IMAP 账号自身生成别名")
         elif provider == "graph":
             if not graph_file:
                 blockers.append("Graph 账号文件未选择（graph_accounts_file）")
@@ -856,6 +871,20 @@ class RegisterService:
                 0,
                 32,
             )
+        if "gmail_imap_port" in data:
+            cfg["gmail_imap_port"] = self._to_int(
+                data.get("gmail_imap_port"),
+                cfg.get("gmail_imap_port", 993),
+                1,
+                65535,
+            )
+        if "gmail_alias_tag_len" in data:
+            cfg["gmail_alias_tag_len"] = self._to_int(
+                data.get("gmail_alias_tag_len"),
+                cfg.get("gmail_alias_tag_len", 8),
+                1,
+                64,
+            )
         if "accounts_list_ssl_retry" in data:
             cfg["accounts_list_ssl_retry"] = self._to_int(
                 data.get("accounts_list_ssl_retry"),
@@ -916,6 +945,10 @@ class RegisterService:
             "graph_accounts_file",
             "graph_tenant",
             "graph_fetch_mode",
+            "gmail_imap_user",
+            "gmail_imap_pass",
+            "gmail_alias_emails",
+            "gmail_imap_server",
             "mailbox_prefix",
             "hero_sms_api_key",
             "hero_sms_service",
@@ -966,6 +999,11 @@ class RegisterService:
             cfg["mailfree_random_domain"] = self._to_bool(
                 data.get("mailfree_random_domain"),
                 bool(cfg.get("mailfree_random_domain", True)),
+            )
+        if "gmail_alias_mix_googlemail" in data:
+            cfg["gmail_alias_mix_googlemail"] = self._to_bool(
+                data.get("gmail_alias_mix_googlemail"),
+                bool(cfg.get("gmail_alias_mix_googlemail", True)),
             )
         if "mailbox_custom_enabled" in data:
             cfg["mailbox_custom_enabled"] = self._to_bool(
@@ -1019,6 +1057,15 @@ class RegisterService:
         if graph_mode not in {"graph_api", "imap_xoauth2"}:
             graph_mode = "graph_api"
         cfg["graph_fetch_mode"] = graph_mode
+        cfg["gmail_imap_server"] = (
+            str(cfg.get("gmail_imap_server") or "imap.gmail.com").strip() or "imap.gmail.com"
+        )
+        cfg["gmail_imap_port"] = self._to_int(cfg.get("gmail_imap_port"), 993, 1, 65535)
+        cfg["gmail_alias_tag_len"] = self._to_int(cfg.get("gmail_alias_tag_len"), 8, 1, 64)
+        cfg["gmail_alias_mix_googlemail"] = self._to_bool(
+            cfg.get("gmail_alias_mix_googlemail"),
+            bool(cfg.get("gmail_alias_mix_googlemail", True)),
+        )
         cfg["hero_sms_country"] = str(cfg.get("hero_sms_country") or "US").strip() or "US"
         cfg["mail_domain_allowlist"] = self._normalize_domain_list(
             cfg.get("mail_domain_allowlist") or []
@@ -1077,6 +1124,21 @@ class RegisterService:
         os.environ["GRAPH_ACCOUNTS_FILE"] = str(self.cfg.get("graph_accounts_file") or "").strip()
         os.environ["GRAPH_TENANT"] = str(self.cfg.get("graph_tenant") or "common").strip()
         os.environ["GRAPH_FETCH_MODE"] = str(self.cfg.get("graph_fetch_mode") or "graph_api").strip()
+        os.environ["GMAIL_IMAP_USER"] = str(self.cfg.get("gmail_imap_user") or "").strip()
+        os.environ["GMAIL_IMAP_PASS"] = str(self.cfg.get("gmail_imap_pass") or "")
+        os.environ["GMAIL_ALIAS_EMAILS"] = str(self.cfg.get("gmail_alias_emails") or "").strip()
+        os.environ["GMAIL_IMAP_SERVER"] = (
+            str(self.cfg.get("gmail_imap_server") or "imap.gmail.com").strip() or "imap.gmail.com"
+        )
+        os.environ["GMAIL_IMAP_PORT"] = str(
+            self._to_int(self.cfg.get("gmail_imap_port"), 993, 1, 65535)
+        )
+        os.environ["GMAIL_ALIAS_TAG_LEN"] = str(
+            self._to_int(self.cfg.get("gmail_alias_tag_len"), 8, 1, 64)
+        )
+        os.environ["GMAIL_ALIAS_MIX_GOOGLEMAIL"] = (
+            "1" if bool(self.cfg.get("gmail_alias_mix_googlemail", True)) else "0"
+        )
         os.environ["HERO_SMS_ENABLED"] = "1" if self.cfg.get("hero_sms_enabled") else "0"
         os.environ["HERO_SMS_REUSE_PHONE"] = "1" if self.cfg.get("hero_sms_reuse_phone") else "0"
         os.environ["HERO_SMS_API_KEY"] = str(self.cfg.get("hero_sms_api_key") or "").strip()
@@ -1882,8 +1944,6 @@ class RegisterService:
                 if allow_domains:
                     self.log(f"配置 -> 指定注册域名 {len(allow_domains)} 个")
             else:
-                graph_file = str(self.cfg.get("graph_accounts_file") or "graph_accounts.txt").strip()
-                graph_tenant = str(self.cfg.get("graph_tenant") or "common").strip()
                 graph_pre_refresh = bool(self.cfg.get("graph_pre_refresh_before_run", True))
                 hero_sms_enabled = bool(self.cfg.get("hero_sms_enabled", False))
                 hero_sms_reuse = bool(self.cfg.get("hero_sms_reuse_phone", False))
@@ -1896,11 +1956,36 @@ class RegisterService:
                     0.0,
                     200.0,
                 )
-                self.log(
-                    "配置 -> "
-                    f"mail={mail_provider}, graph_file={graph_file}, tenant={graph_tenant}, "
-                    f"pre_refresh={'开启' if graph_pre_refresh else '关闭'}"
-                )
+                if mail_provider == "graph":
+                    graph_file = str(self.cfg.get("graph_accounts_file") or "graph_accounts.txt").strip()
+                    graph_tenant = str(self.cfg.get("graph_tenant") or "common").strip()
+                    self.log(
+                        "配置 -> "
+                        f"mail={mail_provider}, graph_file={graph_file}, tenant={graph_tenant}, "
+                        f"pre_refresh={'开启' if graph_pre_refresh else '关闭'}"
+                    )
+                else:
+                    gmail_user = str(self.cfg.get("gmail_imap_user") or "").strip().lower()
+                    gmail_server = (
+                        str(self.cfg.get("gmail_imap_server") or "imap.gmail.com").strip()
+                        or "imap.gmail.com"
+                    )
+                    gmail_port = self._to_int(self.cfg.get("gmail_imap_port"), 993, 1, 65535)
+                    gmail_tag_len = self._to_int(self.cfg.get("gmail_alias_tag_len"), 8, 1, 64)
+                    gmail_mix = bool(self.cfg.get("gmail_alias_mix_googlemail", True))
+                    alias_raw = str(self.cfg.get("gmail_alias_emails") or "").strip()
+                    alias_rows = [
+                        x
+                        for x in re.split(r"[\n\r,;\s]+", alias_raw)
+                        if str(x or "").strip()
+                    ]
+                    alias_count = len(alias_rows) if alias_rows else (1 if gmail_user else 0)
+                    self.log(
+                        "配置 -> "
+                        f"mail={mail_provider}, imap_user={gmail_user}, "
+                        f"imap_server={gmail_server}:{gmail_port}, alias_pool={alias_count}, "
+                        f"tag_len={gmail_tag_len}, mix_googlemail={'开' if gmail_mix else '关'}"
+                    )
                 self.log(
                     "配置 -> "
                     f"hero_sms={'开启' if hero_sms_enabled else '关闭'}, "

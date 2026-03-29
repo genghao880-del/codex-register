@@ -5,7 +5,7 @@ OpenAI 账号自动注册（密码注册 + OAuth 换 token）。
 → 创建账户；若进入手机号页或无 workspace，则另起独立 Session 用邮箱密码登录完成 OAuth。
 
 依赖环境变量（可由 gui 写入进程环境）：MAIL_SERVICE_PROVIDER、WORKER_DOMAIN、
-FREEMAIL_USERNAME、FREEMAIL_PASSWORD；
+FREEMAIL_USERNAME、FREEMAIL_PASSWORD、GRAPH_*、GMAIL_*；
 可选 TOKEN_OUTPUT_DIR、OPENAI_SSL_VERIFY、SKIP_NET_CHECK、MAILFREE_RANDOM_DOMAIN。
 可选 MAILBOX_PREFIX、MAILBOX_RANDOM_LENGTH（控制邮箱本地名前缀与随机长度）。
 可选 REGISTER_RANDOM_FINGERPRINT（1=随机指纹，0=固定）。
@@ -90,7 +90,7 @@ MAIL_ALLOWED_DOMAINS: List[str] = []
 TOKEN_OUTPUT_DIR = os.getenv("TOKEN_OUTPUT_DIR", "").strip()
 
 _mail_service_client: Any = None
-_mail_service_sig: tuple[str, str, str, str, bool, str, str, str] | None = None
+_mail_service_sig: tuple[Any, ...] | None = None
 STOP_EVENT: Any = None
 
 
@@ -1542,11 +1542,26 @@ def _email_domain(email: str) -> str:
         return ""
 
 
-def _mail_service_signature() -> tuple[str, str, str, str, bool, str, str, str]:
+def _mail_service_signature() -> tuple[Any, ...]:
     provider = normalize_mail_provider(MAIL_SERVICE_PROVIDER)
     graph_accounts_file = str(os.getenv("GRAPH_ACCOUNTS_FILE", "") or "").strip()
     graph_tenant = str(os.getenv("GRAPH_TENANT", "common") or "common").strip()
     graph_fetch_mode = str(os.getenv("GRAPH_FETCH_MODE", "graph_api") or "graph_api").strip()
+    gmail_imap_user = str(os.getenv("GMAIL_IMAP_USER", "") or "").strip()
+    gmail_imap_pass = str(os.getenv("GMAIL_IMAP_PASS", "") or "")
+    gmail_alias_emails = str(os.getenv("GMAIL_ALIAS_EMAILS", "") or "").strip()
+    gmail_imap_server = str(os.getenv("GMAIL_IMAP_SERVER", "imap.gmail.com") or "imap.gmail.com").strip()
+    try:
+        gmail_imap_port = int(str(os.getenv("GMAIL_IMAP_PORT", "993") or "993").strip())
+    except Exception:
+        gmail_imap_port = 993
+    try:
+        gmail_alias_tag_len = int(str(os.getenv("GMAIL_ALIAS_TAG_LEN", "8") or "8").strip())
+    except Exception:
+        gmail_alias_tag_len = 8
+    gmail_alias_mix_googlemail = str(
+        os.getenv("GMAIL_ALIAS_MIX_GOOGLEMAIL", "1") or "1"
+    ).strip().lower() in {"1", "true", "yes", "on"}
     return (
         provider,
         str(WORKER_DOMAIN or "").strip().rstrip("/"),
@@ -1556,6 +1571,13 @@ def _mail_service_signature() -> tuple[str, str, str, str, bool, str, str, str]:
         graph_accounts_file,
         graph_tenant,
         graph_fetch_mode,
+        gmail_imap_user,
+        gmail_imap_pass,
+        gmail_alias_emails,
+        gmail_imap_server,
+        gmail_imap_port,
+        gmail_alias_tag_len,
+        gmail_alias_mix_googlemail,
     )
 
 
@@ -1576,10 +1598,33 @@ def _get_mail_service_client():
     if _mail_service_client is not None and _mail_service_sig == sig:
         return _mail_service_client
 
-    provider, base_url, username, password, verify_ssl, graph_accounts_file, graph_tenant, graph_fetch_mode = sig
+    (
+        provider,
+        base_url,
+        username,
+        password,
+        verify_ssl,
+        graph_accounts_file,
+        graph_tenant,
+        graph_fetch_mode,
+        gmail_imap_user,
+        gmail_imap_pass,
+        gmail_alias_emails,
+        gmail_imap_server,
+        gmail_imap_port,
+        gmail_alias_tag_len,
+        gmail_alias_mix_googlemail,
+    ) = sig
     os.environ["GRAPH_ACCOUNTS_FILE"] = graph_accounts_file
     os.environ["GRAPH_TENANT"] = graph_tenant
     os.environ["GRAPH_FETCH_MODE"] = graph_fetch_mode
+    os.environ["GMAIL_IMAP_USER"] = gmail_imap_user
+    os.environ["GMAIL_IMAP_PASS"] = gmail_imap_pass
+    os.environ["GMAIL_ALIAS_EMAILS"] = gmail_alias_emails
+    os.environ["GMAIL_IMAP_SERVER"] = gmail_imap_server
+    os.environ["GMAIL_IMAP_PORT"] = str(gmail_imap_port)
+    os.environ["GMAIL_ALIAS_TAG_LEN"] = str(gmail_alias_tag_len)
+    os.environ["GMAIL_ALIAS_MIX_GOOGLEMAIL"] = "1" if gmail_alias_mix_googlemail else "0"
     try:
         client = build_mail_service(
             provider,
@@ -1686,8 +1731,10 @@ def get_email_and_token(proxies: Any = None) -> tuple:
                 _warn("指定域名均不可用，将由服务端默认域名策略兜底")
             else:
                 _warn("mailfree 未返回可用域名列表，将由服务端默认域名策略兜底")
-        else:
+        elif provider == "graph":
             _info("Graph 模式：忽略 MailFree 域名/前缀规则，直接从账号池取邮箱")
+        else:
+            _info("Gmail 模式：通过 IMAP 别名池接码，忽略 MailFree 域名规则")
 
         pick_rounds = 5
         if provider == "graph":

@@ -4,12 +4,16 @@ import json
 import os
 import random
 import re
+import socket
+import ssl
 import string
+import threading
 import time
 import urllib.parse
 import imaplib
 import email
 import email.header
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from curl_cffi import requests
@@ -24,6 +28,8 @@ def normalize_mail_provider(raw: Any) -> str:
     val = str(raw or "").strip().lower()
     if val in {"mailfree", "freemail", "worker"}:
         return "mailfree"
+    if val in {"gmail", "gmail_imap", "imap_gmail"}:
+        return "gmail"
     if val in {"graph", "microsoft_graph", "msgraph", "microsoft"}:
         return "graph"
     return "mailfree"
@@ -33,6 +39,7 @@ def available_mail_providers() -> list[dict[str, str]]:
     """返回当前可选邮箱服务列表。"""
     return [
         {"label": "MailFree", "value": "mailfree"},
+        {"label": "Gmail IMAP", "value": "gmail"},
         {"label": "Microsoft Graph", "value": "graph"},
     ]
 
@@ -793,6 +800,666 @@ class MailFreeService(MailServiceBase):
         return {"success": True, "mailbox": target, "deleted": max(0, deleted_count)}
 
 
+class GmailImapService(MailServiceBase):
+    provider_id = "gmail"
+    provider_label = "Gmail IMAP"
+
+    def __init__(
+        self,
+        *,
+        imap_user: str,
+        imap_password: str,
+        alias_emails: list[str] | str,
+        imap_server: str,
+        imap_port: int,
+        alias_tag_len: int,
+        mix_googlemail_domain: bool,
+        verify_ssl: bool,
+        logger: Callable[[str], None] | None = None,
+    ) -> None:
+        self.imap_user = str(imap_user or "").strip().lower()
+        self.imap_password = str(imap_password or "")
+        self.imap_server = str(imap_server or "").strip().lower()
+        if not self.imap_server:
+            if any(x in self.imap_user for x in ("@outlook.com", "@hotmail.com", "@live.com")):
+                self.imap_server = "outlook.office365.com"
+            else:
+                self.imap_server = "imap.gmail.com"
+        try:
+            port = int(imap_port)
+        except Exception:
+            port = 993
+        self.imap_port = max(1, min(65535, port))
+
+        try:
+            tag_len = int(alias_tag_len)
+        except Exception:
+            tag_len = 8
+        self.alias_tag_len = max(1, min(64, tag_len))
+
+        self.mix_googlemail_domain = bool(mix_googlemail_domain)
+        self.verify_ssl = bool(verify_ssl)
+        self._logger = logger
+        self._next_alias_idx = 0
+        self._imap_connect_lock = threading.Lock()
+        self._generated_mailboxes: dict[str, dict[str, Any]] = {}
+        self._alias_pool = self._normalize_alias_pool(alias_emails, fallback=self.imap_user)
+
+    def _log(self, msg: str) -> None:
+        if self._logger:
+            self._logger(msg)
+
+    @staticmethod
+    def _normalize_alias_pool(raw: list[str] | str, *, fallback: str = "") -> list[str]:
+        items: list[str] = []
+        if isinstance(raw, list):
+            items = [str(x or "").strip() for x in raw]
+        else:
+            text = str(raw or "")
+            chunks = re.split(r"[\n\r,;\s]+", text)
+            items = [str(x or "").strip() for x in chunks]
+
+        out: list[str] = []
+        for item in items:
+            val = str(item or "").strip()
+            if not val:
+                continue
+            if "----" in val:
+                val = str(val.split("----", 1)[0] or "").strip()
+            val = val.lower()
+            if "@" not in val:
+                continue
+            out.append(val)
+        if fallback and "@" in fallback:
+            out.append(str(fallback).strip().lower())
+        return list(dict.fromkeys([x for x in out if x]))
+
+    def _ensure_config(self) -> None:
+        if not self.imap_user or "@" not in self.imap_user:
+            raise MailServiceError("请先填写 Gmail IMAP 账号（gmail_imap_user）")
+        if not self.imap_password:
+            raise MailServiceError("请先填写 Gmail IMAP 应用专用密码（gmail_imap_pass）")
+        if not self._alias_pool:
+            raise MailServiceError("请先填写 Gmail 别名池（gmail_alias_emails）")
+
+    @staticmethod
+    def _normalize_local_prefix(raw: Any) -> str:
+        prefix = str(raw or "").strip()
+        if not prefix:
+            return ""
+        prefix = re.sub(r"[^a-zA-Z0-9._-]+", "", prefix)
+        return prefix[:40]
+
+    @staticmethod
+    def _build_local_part(prefix: str, random_length: int) -> str:
+        base = GmailImapService._normalize_local_prefix(prefix)
+        try:
+            rlen = int(random_length)
+        except Exception:
+            rlen = 0
+        rlen = max(0, min(32, rlen))
+        if rlen > 0:
+            suffix = "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(rlen))
+            base = f"{base}{suffix}"
+        return base[:64]
+
+    def _pick_master_alias(self, *, random_domain: bool, allowed_domains: list[str] | None) -> str:
+        self._ensure_config()
+        pool = list(self._alias_pool)
+        if isinstance(allowed_domains, list) and allowed_domains:
+            allow = {str(x).strip().lower() for x in allowed_domains if str(x).strip()}
+            if allow:
+                allow_has_google = bool({"gmail.com", "googlemail.com"} & allow)
+
+                def _domain_allowed(alias_email: str) -> bool:
+                    if "@" not in alias_email:
+                        return False
+                    dm = str(alias_email).split("@", 1)[1].strip().lower()
+                    if dm in allow:
+                        return True
+                    if self.mix_googlemail_domain and allow_has_google and dm in {"gmail.com", "googlemail.com"}:
+                        return True
+                    return False
+
+                pool = [
+                    x
+                    for x in pool
+                    if _domain_allowed(x)
+                ]
+                if not pool:
+                    raise MailServiceError("所选域名在 Gmail 别名池中不可用")
+        if not pool:
+            raise MailServiceError("Gmail 别名池为空，无法生成邮箱")
+        if random_domain:
+            return str(random.choice(pool) or "").strip().lower()
+        if self._next_alias_idx >= len(pool):
+            self._next_alias_idx = 0
+        picked = str(pool[self._next_alias_idx] or "").strip().lower()
+        self._next_alias_idx = (self._next_alias_idx + 1) % len(pool)
+        return picked
+
+    @staticmethod
+    def _proxy_url_from_input(proxies: Any) -> str:
+        if isinstance(proxies, dict):
+            return str(proxies.get("https") or proxies.get("http") or "").strip()
+        return str(proxies or "").strip()
+
+    def _imap_ssl_context(self):
+        if self.verify_ssl:
+            return None
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    def _imap_connect(self, *, proxies: Any = None):
+        server = self.imap_server
+        port = self.imap_port
+        ctx = self._imap_ssl_context()
+        proxy_url = self._proxy_url_from_input(proxies)
+        if not proxy_url:
+            return imaplib.IMAP4_SSL(server, port, ssl_context=ctx, timeout=25)
+
+        if "://" not in proxy_url:
+            proxy_url = f"http://{proxy_url}"
+        parsed = urllib.parse.urlparse(proxy_url)
+        host = str(parsed.hostname or "").strip()
+        if not host:
+            return imaplib.IMAP4_SSL(server, port, ssl_context=ctx, timeout=25)
+        p_scheme = str(parsed.scheme or "http").strip().lower()
+        try:
+            p_port = int(parsed.port or (1080 if p_scheme.startswith("socks") else 80))
+        except Exception:
+            p_port = 1080 if p_scheme.startswith("socks") else 80
+        p_user = urllib.parse.unquote(str(parsed.username or ""))
+        p_pass = urllib.parse.unquote(str(parsed.password or ""))
+
+        try:
+            import socks  # type: ignore
+        except Exception as e:
+            self._log(f"[邮箱] 未安装 PySocks，IMAP 走直连: {e}")
+            return imaplib.IMAP4_SSL(server, port, ssl_context=ctx, timeout=25)
+
+        p_type = socks.SOCKS5 if p_scheme.startswith("socks") else socks.HTTP
+        with self._imap_connect_lock:
+            original_socket = socket.socket
+            try:
+                socks.set_default_proxy(p_type, host, p_port, username=p_user or None, password=p_pass or None)
+                socket.socket = socks.socksocket
+                return imaplib.IMAP4_SSL(server, port, ssl_context=ctx, timeout=25)
+            finally:
+                socket.socket = original_socket
+
+    def _imap_login(self, *, proxies: Any = None):
+        conn = self._imap_connect(proxies=proxies)
+        pwd = str(self.imap_password or "").replace(" ", "")
+        conn.login(self.imap_user, pwd)
+        return conn
+
+    def _folder_candidates(self) -> list[tuple[str, str]]:
+        low_server = str(self.imap_server or "").lower()
+        if "outlook" in low_server or "office365" in low_server:
+            return [
+                ("INBOX", "INBOX"),
+                ("Junk", "Junk"),
+                ("Junk Email", "Junk Email"),
+            ]
+        return [
+            ("INBOX", "INBOX"),
+            ('"[Gmail]/Spam"', "[Gmail]/Spam"),
+            ("Spam", "Spam"),
+            ('"[Gmail]/All Mail"', "[Gmail]/All Mail"),
+        ]
+
+    def _folder_select_name(self, folder_id: str) -> str:
+        target = str(folder_id or "").strip()
+        if not target:
+            return "INBOX"
+        for select_name, norm in self._folder_candidates():
+            if norm == target:
+                return select_name
+        return target
+
+    @staticmethod
+    def _imap_message_id(folder: str, uid: str) -> str:
+        return f"imap:{folder}:{uid}"
+
+    @staticmethod
+    def _parse_imap_message_id(raw_id: str) -> tuple[str, str]:
+        target = str(raw_id or "").strip()
+        parts = target.split(":", 2)
+        if len(parts) != 3 or parts[0] != "imap":
+            raise MailServiceError("IMAP 邮件 ID 格式无效")
+        folder = str(parts[1] or "").strip()
+        uid = str(parts[2] or "").strip()
+        if not uid:
+            raise MailServiceError("IMAP 邮件 UID 无效")
+        if not folder:
+            folder = "INBOX"
+        return folder, uid
+
+    @staticmethod
+    def _decode_subject(raw_subject: Any) -> str:
+        try:
+            chunks = email.header.decode_header(str(raw_subject or ""))
+            out: list[str] = []
+            for val, enc in chunks:
+                if isinstance(val, bytes):
+                    out.append(val.decode(enc or "utf-8", errors="replace"))
+                else:
+                    out.append(str(val))
+            text = "".join(out).strip()
+            return text or "(无主题)"
+        except Exception:
+            return str(raw_subject or "(无主题)") or "(无主题)"
+
+    @staticmethod
+    def _extract_message_texts(msg: Any) -> tuple[str, str]:
+        plain_parts: list[str] = []
+        html_parts: list[str] = []
+        try:
+            if msg.is_multipart():
+                for part in msg.walk():
+                    ctype = str(part.get_content_type() or "").lower()
+                    disp = str(part.get("Content-Disposition") or "").lower()
+                    if "attachment" in disp:
+                        continue
+                    if ctype not in {"text/plain", "text/html"}:
+                        continue
+                    raw = part.get_payload(decode=True) or b""
+                    text = raw.decode(part.get_content_charset() or "utf-8", errors="replace")
+                    if ctype == "text/plain":
+                        plain_parts.append(text)
+                    else:
+                        html_parts.append(text)
+            else:
+                ctype = str(msg.get_content_type() or "").lower()
+                raw = msg.get_payload(decode=True) or b""
+                text = raw.decode(msg.get_content_charset() or "utf-8", errors="replace")
+                if ctype == "text/html":
+                    html_parts.append(text)
+                else:
+                    plain_parts.append(text)
+        except Exception:
+            return "", ""
+        return "\n".join(plain_parts).strip(), "\n".join(html_parts).strip()
+
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        body = str(text or "")
+        body = re.sub(r"<style[^>]*>.*?</style>", " ", body, flags=re.IGNORECASE | re.DOTALL)
+        body = re.sub(r"<script[^>]*>.*?</script>", " ", body, flags=re.IGNORECASE | re.DOTALL)
+        body = re.sub(r"<[^>]+>", " ", body)
+        body = " ".join(body.split())
+        return body
+
+    @staticmethod
+    def _message_targets_alias(msg: Any, raw_bytes: bytes, target_mailbox: str) -> bool:
+        target = str(target_mailbox or "").strip().lower()
+        if not target:
+            return True
+        headers = " ".join(
+            [
+                str(msg.get("To") or ""),
+                str(msg.get("Delivered-To") or ""),
+                str(msg.get("X-Original-To") or ""),
+                str(msg.get("Cc") or ""),
+            ]
+        ).lower()
+        if target in headers:
+            return True
+        if raw_bytes:
+            try:
+                body = raw_bytes.decode("utf-8", errors="ignore").lower()
+                if target in body:
+                    return True
+            except Exception:
+                return False
+        return False
+
+    @staticmethod
+    def _extract_uid_from_fetch_meta(meta: Any) -> str:
+        if isinstance(meta, bytes):
+            m = re.search(rb"UID\s+(\d+)", meta)
+            if m:
+                return str(m.group(1).decode("utf-8", errors="ignore") or "")
+        return ""
+
+    def _remember_mailbox(self, address: str, *, count: int | None = None) -> None:
+        addr = str(address or "").strip().lower()
+        if not addr:
+            return
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = self._generated_mailboxes.get(addr) or {
+            "created_at": now,
+            "expires_at": "-",
+            "count": 0,
+        }
+        if count is not None:
+            try:
+                cur["count"] = max(0, int(count))
+            except Exception:
+                cur["count"] = 0
+        self._generated_mailboxes[addr] = cur
+
+    def list_domains(self, *, proxies: Any = None) -> list[str]:
+        _ = proxies
+        domains: list[str] = []
+        has_gmail_domain = False
+        for alias in self._alias_pool:
+            if "@" not in alias:
+                continue
+            domain = str(alias.split("@", 1)[1] or "").strip().lower()
+            if not domain:
+                continue
+            domains.append(domain)
+            if domain in {"gmail.com", "googlemail.com"}:
+                has_gmail_domain = True
+        if has_gmail_domain and self.mix_googlemail_domain:
+            domains.append("gmail.com")
+            domains.append("googlemail.com")
+        return list(dict.fromkeys(domains))
+
+    def generate_mailbox(
+        self,
+        *,
+        random_domain: bool = True,
+        allowed_domains: list[str] | None = None,
+        local_prefix: str = "",
+        random_length: int = 0,
+        proxies: Any = None,
+    ) -> str:
+        _ = proxies
+        master = self._pick_master_alias(random_domain=random_domain, allowed_domains=allowed_domains)
+        if "@" not in master:
+            raise MailServiceError("Gmail 别名池项缺少邮箱")
+        local, domain = master.split("@", 1)
+        local = str(local or "").strip().lower()
+        domain = str(domain or "").strip().lower()
+        if not local or not domain:
+            raise MailServiceError("Gmail 别名池项缺少有效邮箱")
+
+        raw_prefix = str(local_prefix or "").strip()
+        normalized_prefix = self._normalize_local_prefix(raw_prefix)
+        if raw_prefix and not normalized_prefix:
+            raise MailServiceError("邮箱前缀仅支持字母、数字、点、下划线和中划线")
+        desired_local = self._build_local_part(normalized_prefix, random_length)
+
+        if domain in {"gmail.com", "googlemail.com"}:
+            base_local = local.split("+", 1)[0].strip().lower()
+            if not base_local:
+                raise MailServiceError("Gmail 主邮箱 local-part 无效")
+            tag = desired_local or "".join(
+                random.choice(string.ascii_lowercase + string.digits)
+                for _ in range(self.alias_tag_len)
+            )
+            alias_domain = domain
+            if self.mix_googlemail_domain:
+                alias_domain = random.choice(["gmail.com", "googlemail.com"])
+            out = f"{base_local}+{tag}@{alias_domain}".lower()
+        else:
+            out_local = desired_local or "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+            out = f"{out_local}@{domain}".lower()
+
+        self._remember_mailbox(out)
+        return out
+
+    def list_mailboxes(self, *, limit: int = 100, offset: int = 0, proxies: Any = None) -> list[dict[str, Any]]:
+        _ = proxies
+        lim = max(1, min(500, int(limit)))
+        off = max(0, int(offset))
+        rows: list[dict[str, Any]] = []
+        sorted_items = sorted(
+            self._generated_mailboxes.items(),
+            key=lambda kv: str((kv[1] or {}).get("created_at") or ""),
+            reverse=True,
+        )
+        for idx, (addr, meta) in enumerate(sorted_items):
+            rows.append(
+                {
+                    "key": f"{addr}:{idx}",
+                    "address": addr,
+                    "created_at": str((meta or {}).get("created_at") or "-"),
+                    "expires_at": str((meta or {}).get("expires_at") or "-"),
+                    "count": int((meta or {}).get("count") or 0),
+                }
+            )
+        return rows[off: off + lim]
+
+    def delete_mailbox(self, address: str, *, proxies: Any = None) -> dict[str, Any]:
+        _ = proxies
+        target = str(address or "").strip().lower()
+        if not target:
+            raise MailServiceError("邮箱地址不能为空")
+        removed = self._generated_mailboxes.pop(target, None) is not None
+        return {
+            "success": True,
+            "address": target,
+            "removed": removed,
+            "api_method": "LOCAL",
+            "api_path": "gmail/alias-cache",
+        }
+
+    def list_emails(self, mailbox: str, *, proxies: Any = None) -> list[dict[str, Any]]:
+        target = str(mailbox or "").strip().lower()
+        if not target:
+            raise MailServiceError("邮箱地址不能为空")
+        self._ensure_config()
+
+        try:
+            imap_conn = self._imap_login(proxies=proxies)
+        except Exception as e:
+            raise MailServiceError(f"Gmail IMAP 连接失败: {e}") from e
+
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        search_date = (datetime.utcnow() - timedelta(days=2)).strftime("%d-%b-%Y")
+        queries = [
+            f'(FROM "openai.com" SINCE {search_date} UNSEEN)',
+            f'(FROM "openai.com" SINCE {search_date})',
+            f'(SINCE {search_date})',
+        ]
+
+        try:
+            for folder_select, folder_id in self._folder_candidates():
+                try:
+                    typ, _ = imap_conn.select(folder_select, readonly=True)
+                except Exception:
+                    continue
+                if typ != "OK":
+                    continue
+
+                ids: list[bytes] = []
+                for q in queries:
+                    try:
+                        typ, data = imap_conn.search(None, q)
+                    except Exception:
+                        continue
+                    if typ != "OK":
+                        continue
+                    raw_ids = (data[0] or b"") if isinstance(data, list) and data else b""
+                    ids = [x for x in raw_ids.split() if x]
+                    if ids:
+                        break
+                if not ids:
+                    continue
+
+                for raw_seq in reversed(ids[-120:]):
+                    seq = raw_seq.decode("utf-8", errors="ignore").strip()
+                    if not seq:
+                        continue
+                    try:
+                        typ, msg_data = imap_conn.fetch(raw_seq, "(UID RFC822)")
+                    except Exception:
+                        continue
+                    if typ != "OK":
+                        continue
+
+                    raw_bytes = b""
+                    uid = ""
+                    for part in msg_data:
+                        if isinstance(part, tuple):
+                            uid = uid or self._extract_uid_from_fetch_meta(part[0])
+                            raw_bytes = part[1] or b""
+                            if raw_bytes:
+                                break
+                    if not raw_bytes:
+                        continue
+                    uid = uid or seq
+                    mid = self._imap_message_id(folder_id, uid)
+                    if mid in seen:
+                        continue
+
+                    msg_obj = email.message_from_bytes(raw_bytes)
+                    if not self._message_targets_alias(msg_obj, raw_bytes, target):
+                        continue
+
+                    plain, html = self._extract_message_texts(msg_obj)
+                    preview = plain or self._strip_html(html)
+                    preview = " ".join(str(preview or "").split())
+                    if len(preview) > 180:
+                        preview = preview[:180] + "…"
+
+                    rows.append(
+                        {
+                            "id": mid,
+                            "from": str(msg_obj.get("From") or "-").strip() or "-",
+                            "subject": self._decode_subject(msg_obj.get("Subject")),
+                            "date": str(msg_obj.get("Date") or "-").strip() or "-",
+                            "preview": preview,
+                            "intro": preview,
+                            "text": plain,
+                            "html": html,
+                            "mailbox": target,
+                            "raw": {
+                                "folder": folder_id,
+                                "uid": uid,
+                            },
+                        }
+                    )
+                    seen.add(mid)
+        finally:
+            try:
+                imap_conn.logout()
+            except Exception:
+                pass
+
+        self._remember_mailbox(target, count=len(rows))
+        return rows
+
+    def _fetch_message_by_uid(self, folder: str, uid: str, *, proxies: Any = None) -> tuple[Any, bytes]:
+        folder_id = str(folder or "").strip() or "INBOX"
+        uid_val = str(uid or "").strip()
+        if not uid_val:
+            raise MailServiceError("IMAP 邮件 UID 无效")
+
+        try:
+            imap_conn = self._imap_login(proxies=proxies)
+        except Exception as e:
+            raise MailServiceError(f"Gmail IMAP 连接失败: {e}") from e
+
+        try:
+            folder_select = self._folder_select_name(folder_id)
+            typ, _ = imap_conn.select(folder_select, readonly=True)
+            if typ != "OK":
+                raise MailServiceError("IMAP 选择邮箱失败")
+            typ, msg_data = imap_conn.uid("FETCH", uid_val, "(RFC822)")
+            if typ != "OK":
+                raise MailServiceError("IMAP 获取邮件详情失败")
+            raw_bytes = b""
+            for part in msg_data:
+                if isinstance(part, tuple):
+                    raw_bytes = part[1] or b""
+                    if raw_bytes:
+                        break
+            if not raw_bytes:
+                raise MailServiceError("IMAP 获取邮件详情失败: 未找到邮件")
+            msg_obj = email.message_from_bytes(raw_bytes)
+            return msg_obj, raw_bytes
+        finally:
+            try:
+                imap_conn.logout()
+            except Exception:
+                pass
+
+    def get_email_detail(self, email_id: str, *, proxies: Any = None) -> dict[str, Any]:
+        target = str(email_id or "").strip()
+        if not target:
+            raise MailServiceError("邮件 ID 不能为空")
+        folder, uid = self._parse_imap_message_id(target)
+        msg_obj, raw_bytes = self._fetch_message_by_uid(folder, uid, proxies=proxies)
+        plain, html = self._extract_message_texts(msg_obj)
+        subject = self._decode_subject(msg_obj.get("Subject"))
+        sender = str(msg_obj.get("From") or "-").strip() or "-"
+        date_val = str(msg_obj.get("Date") or "-").strip() or "-"
+        raw_text = raw_bytes.decode("utf-8", errors="replace")
+        content = self.merge_mail_content(
+            {
+                "subject": subject,
+                "intro": "",
+                "text": plain,
+                "html": html,
+                "raw": raw_text,
+            }
+        )
+        return {
+            "id": target,
+            "from": sender,
+            "subject": subject,
+            "date": date_val,
+            "text": plain,
+            "html": html,
+            "raw": raw_text,
+            "content": content,
+            "payload": {"folder": folder, "uid": uid},
+        }
+
+    def delete_email(self, email_id: str, *, proxies: Any = None) -> dict[str, Any]:
+        target = str(email_id or "").strip()
+        if not target:
+            raise MailServiceError("邮件 ID 不能为空")
+        folder, uid = self._parse_imap_message_id(target)
+        folder_select = self._folder_select_name(folder)
+
+        try:
+            imap_conn = self._imap_login(proxies=proxies)
+        except Exception as e:
+            raise MailServiceError(f"Gmail IMAP 连接失败: {e}") from e
+
+        try:
+            typ, _ = imap_conn.select(folder_select, readonly=False)
+            if typ != "OK":
+                raise MailServiceError("IMAP 删除邮件失败: 选择邮箱失败")
+            typ, _ = imap_conn.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+            if typ != "OK":
+                raise MailServiceError("IMAP 删除邮件失败")
+            imap_conn.expunge()
+        finally:
+            try:
+                imap_conn.logout()
+            except Exception:
+                pass
+        return {"success": True, "id": target}
+
+    def clear_emails(self, mailbox: str, *, proxies: Any = None) -> dict[str, Any]:
+        target = str(mailbox or "").strip().lower()
+        if not target:
+            raise MailServiceError("邮箱地址不能为空")
+        mails = self.list_emails(target, proxies=proxies)
+        deleted = 0
+        for row in mails:
+            mid = str((row or {}).get("id") or "").strip()
+            if not mid:
+                continue
+            try:
+                self.delete_email(mid, proxies=proxies)
+                deleted += 1
+            except Exception:
+                continue
+        self._remember_mailbox(target, count=max(0, len(mails) - deleted))
+        return {"success": True, "mailbox": target, "deleted": deleted}
+
+
 class MicrosoftGraphService(MailServiceBase):
     provider_id = "graph"
     provider_label = "Microsoft Graph"
@@ -1457,6 +2124,13 @@ def build_mail_service(
             verify_ssl=verify_ssl,
             logger=logger,
         )
+    if p == "gmail":
+        from mail_service_gmail import build_gmail_service
+
+        return build_gmail_service(
+            verify_ssl=verify_ssl,
+            logger=logger,
+        )
     if p == "graph":
         from mail_service_graph import build_graph_service
 
@@ -1470,6 +2144,7 @@ def build_mail_service(
 __all__ = [
     "MailServiceBase",
     "MailServiceError",
+    "GmailImapService",
     "MicrosoftGraphService",
     "MailFreeService",
     "available_mail_providers",

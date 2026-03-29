@@ -103,6 +103,13 @@
           graph_tenant: "common",
           graph_fetch_mode: "graph_api",
           graph_pre_refresh_before_run: true,
+          gmail_imap_user: "",
+          gmail_imap_pass: "",
+          gmail_alias_emails: "",
+          gmail_imap_server: "imap.gmail.com",
+          gmail_imap_port: 993,
+          gmail_alias_tag_len: 8,
+          gmail_alias_mix_googlemail: true,
           hero_sms_enabled: false,
           hero_sms_reuse_phone: false,
           hero_sms_api_key: "",
@@ -229,6 +236,13 @@
             mailTotal: 0
           },
           graph: {
+            domains: [],
+            mailboxRows: [],
+            selectedMailbox: "",
+            mailRows: [],
+            mailTotal: 0
+          },
+          gmail: {
             domains: [],
             mailboxRows: [],
             selectedMailbox: "",
@@ -544,6 +558,34 @@
           return `示例：${localPart}@${domain}（${domainMode}）${tip}`;
         });
 
+        const gmailAliasPreviewText = Vue.computed(() => {
+          const user = String(settingsForm.gmail_imap_user || "").trim().toLowerCase();
+          const aliasRaw = String(settingsForm.gmail_alias_emails || "").trim();
+          const aliases = aliasRaw
+            ? aliasRaw
+              .split(/[\n\r,;\s]+/)
+              .map((x) => String(x || "").trim().toLowerCase())
+              .filter((x) => x && x.includes("@"))
+            : [];
+          const base = String(aliases[0] || user || "name@gmail.com");
+          const server = String(settingsForm.gmail_imap_server || "imap.gmail.com").trim() || "imap.gmail.com";
+          const port = Math.max(1, Number(settingsForm.gmail_imap_port || 993));
+          const tagLen = Math.max(1, Math.min(64, Math.floor(Number(settingsForm.gmail_alias_tag_len || 8))));
+          const mixGooglemail = !!settingsForm.gmail_alias_mix_googlemail;
+          const sampleTag = tagLen <= 12 ? "x".repeat(tagLen) : `${"x".repeat(12)}(+${tagLen - 12})`;
+
+          if (!base.includes("@")) {
+            return `示例：name+${sampleTag}@gmail.com · IMAP ${server}:${port}`;
+          }
+          const parts = base.split("@");
+          const local = String(parts[0] || "name").split("+", 1)[0];
+          const domain = String(parts[1] || "gmail.com").toLowerCase();
+          const aliasDomain = mixGooglemail && (domain === "gmail.com" || domain === "googlemail.com")
+            ? "gmail.com / googlemail.com"
+            : domain;
+          return `示例：${local}+${sampleTag}@${aliasDomain} · IMAP ${server}:${port}`;
+        });
+
         const selectedMailLabel = Vue.computed(() => {
           if (!selectedMailId.value) return "-";
           const row = mailRows.value.find((x) => String(x.id || "") === String(selectedMailId.value));
@@ -733,6 +775,13 @@
           if (selected.length) {
             setDomainSelection(selected);
           }
+        }
+
+        function normalizeMailProvider(raw) {
+          const val = String(raw || "mailfree").trim().toLowerCase();
+          if (val === "graph") return "graph";
+          if (val === "gmail") return "gmail";
+          return "mailfree";
         }
 
         function remoteRowClassName(row) {
@@ -981,8 +1030,8 @@
           dashForm.fast_mode = !!cfg.fast_mode;
           dashForm.proxy = String(cfg.proxy || "");
 
-          settingsForm.mail_service_provider = String(cfg.mail_service_provider || "mailfree");
-          mailProviderTab.value = settingsForm.mail_service_provider === "graph" ? "graph" : "mailfree";
+          settingsForm.mail_service_provider = normalizeMailProvider(cfg.mail_service_provider || "mailfree");
+          mailProviderTab.value = settingsForm.mail_service_provider;
           settingsForm.mail_domain_allowlist = normalizeDomainList(cfg.mail_domain_allowlist || []);
           settingsForm.worker_domain = String(cfg.worker_domain || "");
           settingsForm.freemail_username = String(cfg.freemail_username || "");
@@ -991,6 +1040,13 @@
           settingsForm.graph_tenant = String(cfg.graph_tenant || "common");
           settingsForm.graph_fetch_mode = String(cfg.graph_fetch_mode || "graph_api");
           settingsForm.graph_pre_refresh_before_run = cfg.graph_pre_refresh_before_run !== false;
+          settingsForm.gmail_imap_user = String(cfg.gmail_imap_user || "");
+          settingsForm.gmail_imap_pass = String(cfg.gmail_imap_pass || "");
+          settingsForm.gmail_alias_emails = String(cfg.gmail_alias_emails || "");
+          settingsForm.gmail_imap_server = String(cfg.gmail_imap_server || "imap.gmail.com");
+          settingsForm.gmail_imap_port = Number(cfg.gmail_imap_port || 993);
+          settingsForm.gmail_alias_tag_len = Number(cfg.gmail_alias_tag_len || 8);
+          settingsForm.gmail_alias_mix_googlemail = cfg.gmail_alias_mix_googlemail !== false;
           settingsForm.hero_sms_enabled = !!cfg.hero_sms_enabled;
           settingsForm.hero_sms_reuse_phone = !!cfg.hero_sms_reuse_phone;
           settingsForm.hero_sms_api_key = String(cfg.hero_sms_api_key || "");
@@ -1039,7 +1095,7 @@
             sleep_max: Number(dashForm.sleep_max || 30),
             fast_mode: !!dashForm.fast_mode,
             proxy: String(dashForm.proxy || "").trim(),
-            mail_service_provider: String(settingsForm.mail_service_provider || "mailfree").trim(),
+            mail_service_provider: normalizeMailProvider(settingsForm.mail_service_provider || "mailfree"),
             mail_domain_allowlist: normalizeDomainList(settingsForm.mail_domain_allowlist || []),
             worker_domain: String(settingsForm.worker_domain || "").trim(),
             freemail_username: String(settingsForm.freemail_username || "").trim(),
@@ -1048,6 +1104,13 @@
             graph_tenant: String(settingsForm.graph_tenant || "common").trim(),
             graph_fetch_mode: String(settingsForm.graph_fetch_mode || "graph_api").trim(),
             graph_pre_refresh_before_run: !!settingsForm.graph_pre_refresh_before_run,
+            gmail_imap_user: String(settingsForm.gmail_imap_user || "").trim(),
+            gmail_imap_pass: String(settingsForm.gmail_imap_pass || "").trim(),
+            gmail_alias_emails: String(settingsForm.gmail_alias_emails || "").trim(),
+            gmail_imap_server: String(settingsForm.gmail_imap_server || "imap.gmail.com").trim(),
+            gmail_imap_port: Number(settingsForm.gmail_imap_port || 993),
+            gmail_alias_tag_len: Number(settingsForm.gmail_alias_tag_len || 8),
+            gmail_alias_mix_googlemail: !!settingsForm.gmail_alias_mix_googlemail,
             hero_sms_enabled: !!settingsForm.hero_sms_enabled,
             hero_sms_reuse_phone: !!settingsForm.hero_sms_reuse_phone,
             hero_sms_api_key: String(settingsForm.hero_sms_api_key || "").trim(),
@@ -1939,8 +2002,7 @@
         }
 
         function currentMailProviderKey() {
-          const p = String(mailProviderTab.value || settingsForm.mail_service_provider || "mailfree");
-          return p === "graph" ? "graph" : "mailfree";
+          return normalizeMailProvider(mailProviderTab.value || settingsForm.mail_service_provider || "mailfree");
         }
 
         function snapshotMailViewToCache() {
@@ -1958,7 +2020,7 @@
         }
 
         function restoreMailViewFromCache(provider) {
-          const key = String(provider || "mailfree") === "graph" ? "graph" : "mailfree";
+          const key = normalizeMailProvider(provider || "mailfree");
           const source = mailViewCache[key];
           mailDomains.value = Array.isArray(source.domains) ? [...source.domains] : [];
           mailboxRows.value = Array.isArray(source.mailboxRows)
@@ -1981,9 +2043,9 @@
             value: String((it && it.value) || "")
           })).filter((it) => it.label && it.value);
 
-          const current = String(data.current || settingsForm.mail_service_provider || "mailfree");
+          const current = normalizeMailProvider(data.current || settingsForm.mail_service_provider || "mailfree");
           settingsForm.mail_service_provider = current;
-          mailProviderTab.value = current === "graph" ? "graph" : "mailfree";
+          mailProviderTab.value = current;
           mailState.provider = current;
           mailDomains.value = Array.isArray(data.domains)
             ? normalizeDomainList(data.domains)
@@ -2156,8 +2218,8 @@
 
         function updateMailProviderByTab(nextVal) {
           snapshotMailViewToCache();
-          const val = String(nextVal || "mailfree");
-          mailProviderTab.value = val === "graph" ? "graph" : "mailfree";
+          const val = normalizeMailProvider(nextVal || "mailfree");
+          mailProviderTab.value = val;
           settingsForm.mail_service_provider = mailProviderTab.value;
           restoreMailViewFromCache(mailProviderTab.value);
           if (mailProviderTab.value === "graph") {
@@ -2178,7 +2240,7 @@
         async function refreshMailOverview(showSuccess = true) {
           loading.mail_overview = true;
           try {
-            settingsForm.mail_service_provider = mailProviderTab.value === "graph" ? "graph" : "mailfree";
+            settingsForm.mail_service_provider = normalizeMailProvider(mailProviderTab.value || settingsForm.mail_service_provider);
             await saveConfig(false);
             const data = await apiRequest("/api/mail/overview", {
               method: "POST",
@@ -2577,7 +2639,9 @@
             return;
           }
           if (tab === "mail") {
-            await refreshGraphAccountFiles(false);
+            if (normalizeMailProvider(mailProviderTab.value) === "graph") {
+              await refreshGraphAccountFiles(false);
+            }
             await loadMailDomainStats();
             if (mailState.loaded) return;
             try {
@@ -2658,6 +2722,7 @@
           graphFileInputRef,
           mailInfoText,
           mailboxPatternPreviewText,
+          gmailAliasPreviewText,
           mailDetailText,
           logText,
           logScrollContainerRef,
