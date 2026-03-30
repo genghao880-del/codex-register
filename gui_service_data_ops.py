@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import zipfile
 from datetime import datetime
 from typing import Any
@@ -180,6 +181,13 @@ def _account_to_codex_record(acc: dict[str, Any]) -> dict[str, str]:
         "last_refresh": last_refresh,
         "refresh_token": refresh_token,
     }
+
+
+def _normalize_remote_account_provider(raw: Any) -> str:
+    val = str(raw or "sub2api").strip().lower()
+    if val in {"cliproxyapi", "cliproxy", "cli_proxy_api", "cpa"}:
+        return "cliproxyapi"
+    return "sub2api"
 
 
 def export_codex_accounts(service, emails: list[Any]) -> dict[str, Any]:
@@ -490,7 +498,11 @@ def delete_json_files(service, paths: list[str]) -> dict[str, Any]:
     }
 
 
-def sync_selected_accounts(service, emails: list[str]) -> dict[str, Any]:
+def sync_selected_accounts(
+    service,
+    emails: list[str],
+    provider_override: str = "",
+) -> dict[str, Any]:
     selected = [str(e).strip().lower() for e in emails if str(e).strip()]
     if not selected:
         raise ValueError("请先勾选要同步的账号")
@@ -504,17 +516,9 @@ def sync_selected_accounts(service, emails: list[str]) -> dict[str, Any]:
     fail = 0
     missing: list[str] = []
     try:
-        url = str(service.cfg.get("accounts_sync_api_url") or "").strip()
-        tok = str(service.cfg.get("accounts_sync_bearer_token") or "").strip()
-        verify_ssl = bool(service.cfg.get("openai_ssl_verify", True))
-        proxy_arg = str(service.cfg.get("proxy") or "").strip() or None
-
-        if not url:
-            raise ValueError("请先填写同步 API 地址")
-        if not tok:
-            raise ValueError("请先填写 Bearer Token")
-
-        auth = tok if tok.lower().startswith("bearer ") else f"Bearer {tok}"
+        remote_provider = _normalize_remote_account_provider(
+            provider_override or (service.cfg or {}).get("remote_account_provider") or "sub2api"
+        )
         emails_uniq = list(dict.fromkeys(selected))
         local_map = build_local_account_index(service)
 
@@ -532,6 +536,63 @@ def sync_selected_accounts(service, emails: list[str]) -> dict[str, Any]:
         if not found_accounts:
             fail = len(emails_uniq)
             raise RuntimeError("本地 JSON 中未找到可同步账号")
+
+        if remote_provider == "cliproxyapi":
+            base, auth, verify_ssl, proxy_arg = service._cliproxy_management_context()
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": auth,
+            }
+
+            for idx, acc in enumerate(found_accounts, start=1):
+                row = _account_to_codex_record(acc)
+                email = str(row.get("email") or "").strip().lower()
+                if not email:
+                    fail += 1
+                    continue
+                stem = _safe_export_stem(email, f"codex_account_{idx}")
+                file_name = f"{stem}.json"
+                body = json.dumps(row, ensure_ascii=False).encode("utf-8")
+                q = urllib.parse.urlencode({"name": file_name})
+                url = f"{base.rstrip('/')}/auth-files?{q}"
+                code, text = _http_post_json(
+                    url,
+                    body,
+                    headers,
+                    verify_ssl=verify_ssl,
+                    proxy=proxy_arg,
+                )
+                success = 200 <= code < 300
+                if success and (text or "").strip():
+                    try:
+                        payload = json.loads(text)
+                    except Exception:
+                        payload = {}
+                    if isinstance(payload, dict) and payload.get("error"):
+                        success = False
+                if success:
+                    ok += 1
+                else:
+                    fail += 1
+                    snippet = (text or "")[:220].replace("\n", " ")
+                    service.log(f"CLIProxyAPI 导入失败 {email}: HTTP {code} {snippet}")
+
+            fail += len(missing)
+            service.log(f"CLIProxyAPI 导入完成：成功 {ok}，失败 {fail}")
+            return {"ok": ok, "fail": fail, "missing": missing}
+
+        url = str(service.cfg.get("accounts_sync_api_url") or "").strip()
+        tok = str(service.cfg.get("accounts_sync_bearer_token") or "").strip()
+        verify_ssl = bool(service.cfg.get("openai_ssl_verify", True))
+        proxy_arg = str(service.cfg.get("proxy") or "").strip() or None
+
+        if not url:
+            raise ValueError("请先填写同步 API 地址")
+        if not tok:
+            raise ValueError("请先填写 Bearer Token")
+
+        auth = tok if tok.lower().startswith("bearer ") else f"Bearer {tok}"
 
         payload = {
             "data": {"accounts": found_accounts, "proxies": []},

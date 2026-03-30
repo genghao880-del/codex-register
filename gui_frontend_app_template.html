@@ -115,126 +115,156 @@
                   </div>
 
                   <div v-else-if="activeTab === 'data'" class="tab-page">
-                    <div class="split-grid">
-                      <n-card class="glass-card" title="导出 JSON" size="small">
-                        <template #header-extra>
-                          <span class="meta">{{ jsonInfo.file_count }} 个文件 · {{ jsonInfo.account_total }} 账号</span>
-                        </template>
-                        <div class="toolbar">
-                          <n-button class="toolbar-btn" @click="refreshJson(true)">刷新</n-button>
-                          <n-button class="toolbar-btn" @click="jsonSelectAll">全选</n-button>
-                          <n-button class="toolbar-btn" @click="jsonSelectNone">全不选</n-button>
-                          <n-button class="toolbar-btn" type="error" ghost @click="deleteSelectedJson">删除已勾选</n-button>
-                        </div>
-                        <n-data-table
-                          class="json-table"
-                          size="small"
-                          table-layout="fixed"
-                          :single-line="false"
-                          :columns="jsonColumns"
-                          :data="jsonRows"
-                          :row-key="rowKeyPath"
-                          :row-class-name="jsonRowClassName"
-                          v-model:checked-row-keys="jsonSelection"
-                        />
-                      </n-card>
-
-                      <n-card class="glass-card" title="账号列表" size="small">
-                        <template #header-extra>
-                          <span class="meta">共 {{ accountInfo.total }} 个 · {{ accountInfo.path }}</span>
-                        </template>
-                        <div class="toolbar">
-                          <n-button class="toolbar-btn" @click="refreshAccounts(true)">刷新</n-button>
-                          <n-select
-                            class="toolbar-select"
-                            v-model:value="accountBatchFiles"
-                            :options="accountInfo.file_options"
-                            multiple
-                            clearable
-                            :max-tag-count="1"
-                            placeholder="按文件名批量勾选"
-                          />
-                          <n-input
-                            class="toolbar-path"
-                            v-model:value="settingsForm.codex_export_dir"
-                            clearable
-                            placeholder="CodeX 导出目录（必填）"
-                          />
-                          <n-button class="toolbar-btn" :loading="loading.save" @click="saveConfig(true)">保存目录</n-button>
-                          <n-button class="toolbar-btn" @click="acctSelectByFiles">按文件勾选</n-button>
-                          <n-button class="toolbar-btn" @click="acctSelectAll">全选</n-button>
-                          <n-button class="toolbar-btn" @click="acctSelectNone">全不选</n-button>
-                          <n-button class="toolbar-btn" type="primary" :loading="loading.sync || status.sync_busy" @click="syncSelectedAccounts">同步已勾选</n-button>
-                          <n-button class="toolbar-btn" type="warning" :loading="loading.codex_export" :disabled="!accountSelection.length" @click="exportSelectedCodeX">导出为CPA</n-button>
-                        </div>
-                        <div class="account-table-wrap">
-                          <n-data-table
-                            class="account-table"
-                            size="small"
-                            table-layout="fixed"
-                            :single-line="false"
-                            :columns="accountColumns"
-                            :data="accountRows"
-                            :row-key="rowKeyAccount"
-                            :row-class-name="accountRowClassName"
-                            :max-height="430"
-                            v-model:checked-row-keys="accountSelection"
-                          />
-                        </div>
-                      </n-card>
-                    </div>
-
-                    <n-card class="glass-card" title="服务端账号（管理端）" size="small" style="margin-top: 12px">
-                      <div class="toolbar remote-toolbar">
-                        <n-input
-                          class="remote-search"
-                          v-model:value="remoteSearch"
-                          clearable
-                          placeholder="搜索名称/邮箱"
-                        />
-                        <n-button class="toolbar-btn" type="primary" :loading="loading.remote || status.remote_busy" @click="fetchRemoteAll">获取列表与额度</n-button>
-                        <n-button class="toolbar-btn" @click="remoteSelectAll">全选</n-button>
-                        <n-button class="toolbar-btn" @click="remoteSelectNone">全不选</n-button>
-                        <n-button class="toolbar-btn" @click="remoteSelectFailed">全选失败</n-button>
-                        <n-button class="toolbar-btn" @click="remoteSelectDuplicate">全选重复</n-button>
-                        <n-button
-                          class="toolbar-btn"
-                          type="success"
-                          :loading="loading.remote_test || status.remote_test_busy"
-                          @click="testSelectedRemoteAccounts"
-                        >批量测试已选</n-button>
-                        <n-button
-                          class="toolbar-btn"
-                          type="warning"
-                          :loading="loading.remote_revive"
-                          @click="reviveSelectedRemoteAccounts"
-                        >复活已选</n-button>
-                        <n-button
-                          class="toolbar-btn"
-                          type="primary"
-                          :loading="loading.remote_groups"
-                          :disabled="!remoteSelection.length"
-                          @click="openRemoteGroupModal"
-                        >批量编辑分组</n-button>
-                        <n-button
-                          class="toolbar-btn"
-                          type="error"
-                          :loading="loading.remote_delete"
-                          @click="deleteSelectedRemoteAccounts"
-                        >批量删除已选</n-button>
+                    <n-card class="glass-card" title="导出 JSON" size="small">
+                      <template #header-extra>
+                        <span class="meta">{{ jsonInfo.file_count }} 个文件 · {{ jsonInfo.account_total }} 账号</span>
+                      </template>
+                      <div class="toolbar">
+                        <n-button class="toolbar-btn" @click="refreshJson(true)">刷新</n-button>
+                        <n-button class="toolbar-btn" @click="jsonSelectAll">全选</n-button>
+                        <n-button class="toolbar-btn" @click="jsonSelectNone">全不选</n-button>
+                        <n-button class="toolbar-btn" type="error" ghost @click="deleteSelectedJson">删除已勾选</n-button>
                       </div>
-                      <div class="meta">{{ remoteInfoText }}</div>
                       <n-data-table
-                        class="remote-table"
+                        class="json-table"
                         size="small"
                         table-layout="fixed"
                         :single-line="false"
-                        :columns="remoteColumns"
-                        :data="remoteRows"
-                        :row-key="rowKeyRemote"
-                        :row-class-name="remoteRowClassName"
-                        v-model:checked-row-keys="remoteSelection"
+                        :columns="jsonColumns"
+                        :data="jsonRows"
+                        :row-key="rowKeyPath"
+                        :row-class-name="jsonRowClassName"
+                        v-model:checked-row-keys="jsonSelection"
                       />
+                    </n-card>
+                  </div>
+
+                  <div v-else-if="activeTab === 'accounts'" class="tab-page">
+                    <n-card class="glass-card" title="账号管理" size="small">
+                      <n-tabs type="segment" :value="accountManageTab" @update:value="accountManageTab = $event">
+                        <n-tab-pane name="local" tab="导入账号">
+                          <div class="meta">本地账号：{{ accountInfo.total }} 个 · {{ accountInfo.path }}</div>
+                          <div class="toolbar">
+                            <n-button class="toolbar-btn" @click="refreshAccounts(true)">刷新</n-button>
+                            <n-select
+                              class="toolbar-select"
+                              v-model:value="accountBatchFiles"
+                              :options="accountInfo.file_options"
+                              multiple
+                              clearable
+                              :max-tag-count="1"
+                              placeholder="按文件名批量勾选"
+                            />
+                            <n-input
+                              class="toolbar-path"
+                              v-model:value="settingsForm.codex_export_dir"
+                              clearable
+                              placeholder="CodeX 导出目录（必填）"
+                            />
+                            <n-button class="toolbar-btn" :loading="loading.save" @click="saveConfig(true)">保存目录</n-button>
+                            <n-button class="toolbar-btn" @click="acctSelectByFiles">按文件勾选</n-button>
+                            <n-button class="toolbar-btn" @click="acctSelectAll">全选</n-button>
+                            <n-button class="toolbar-btn" @click="acctSelectNone">全不选</n-button>
+                            <n-button class="toolbar-btn" type="primary" :loading="loading.sync || status.sync_busy" @click="syncSelectedAccounts('sub2api')">导入到sub2api</n-button>
+                            <n-button class="toolbar-btn" type="primary" ghost :loading="loading.sync || status.sync_busy" @click="syncSelectedAccounts('cliproxyapi')">导入到cpa</n-button>
+                            <n-button class="toolbar-btn" type="warning" :loading="loading.codex_export" :disabled="!accountSelection.length" @click="exportSelectedCodeX">导出为CPA可用文件</n-button>
+                          </div>
+                          <div class="account-table-wrap">
+                            <n-data-table
+                              class="account-table"
+                              size="small"
+                              table-layout="fixed"
+                              :single-line="false"
+                              :columns="accountColumns"
+                              :data="accountRows"
+                              :row-key="rowKeyAccount"
+                              :row-class-name="accountRowClassName"
+                              :max-height="430"
+                              v-model:checked-row-keys="accountSelection"
+                            />
+                          </div>
+                        </n-tab-pane>
+
+                        <n-tab-pane name="remote" tab="云端账号">
+                          <n-tabs
+                            class="remote-provider-tabs"
+                            type="segment"
+                            :value="settingsForm.remote_account_provider"
+                            @update:value="updateRemoteAccountProvider"
+                          >
+                            <n-tab-pane name="sub2api" tab="Sub2API">
+                              <span style="display:none"></span>
+                            </n-tab-pane>
+                            <n-tab-pane name="cliproxyapi" tab="CLIProxyAPI">
+                              <span style="display:none"></span>
+                            </n-tab-pane>
+                          </n-tabs>
+                          <div v-if="settingsForm.remote_account_provider === 'cliproxyapi'" class="meta" style="margin-top: 6px">
+                            CLIProxyAPI 使用 Management API 的 <code>/auth-files</code> 体系进行列表、导入、测活与刷新。
+                          </div>
+                          <div v-else class="meta" style="margin-top: 6px">
+                            Sub2API 使用账号列表接口进行分页拉取、测活、刷新、复活与分组管理。
+                          </div>
+                          <div class="toolbar remote-toolbar">
+                            <n-input
+                              class="remote-search"
+                              v-model:value="remoteSearch"
+                              clearable
+                              placeholder="搜索名称/邮箱"
+                            />
+                            <n-button class="toolbar-btn" type="primary" :loading="loading.remote || status.remote_busy" @click="fetchRemoteAll">刷新云端列表</n-button>
+                            <n-button class="toolbar-btn" @click="remoteSelectAll">全选</n-button>
+                            <n-button class="toolbar-btn" @click="remoteSelectNone">全不选</n-button>
+                            <n-button class="toolbar-btn" @click="remoteSelectFailed">全选失败</n-button>
+                            <n-button class="toolbar-btn" @click="remoteSelectDuplicate">全选重复</n-button>
+                            <n-button
+                              class="toolbar-btn"
+                              type="success"
+                              :loading="loading.remote_test || status.remote_test_busy"
+                              @click="testSelectedRemoteAccounts"
+                            >批量测活</n-button>
+                            <n-button
+                              class="toolbar-btn"
+                              type="warning"
+                              :loading="loading.remote_refresh"
+                              @click="refreshSelectedRemoteAccounts"
+                            >批量刷新</n-button>
+                            <n-button
+                              v-if="settingsForm.remote_account_provider === 'sub2api'"
+                              class="toolbar-btn"
+                              type="warning"
+                              :loading="loading.remote_revive"
+                              @click="reviveSelectedRemoteAccounts"
+                            >复活已选</n-button>
+                            <n-button
+                              v-if="settingsForm.remote_account_provider === 'sub2api'"
+                              class="toolbar-btn"
+                              type="primary"
+                              :loading="loading.remote_groups"
+                              :disabled="!remoteSelection.length"
+                              @click="openRemoteGroupModal"
+                            >批量编辑分组</n-button>
+                            <n-button
+                              class="toolbar-btn"
+                              type="error"
+                              :loading="loading.remote_delete"
+                              @click="deleteSelectedRemoteAccounts"
+                            >批量删除已选</n-button>
+                          </div>
+                          <div class="meta">{{ remoteInfoText }}</div>
+                          <n-data-table
+                            class="remote-table"
+                            size="small"
+                            table-layout="fixed"
+                            :single-line="false"
+                            :columns="remoteColumns"
+                            :data="remoteRows"
+                            :row-key="rowKeyRemote"
+                            :row-class-name="remoteRowClassName"
+                            v-model:checked-row-keys="remoteSelection"
+                          />
+                        </n-tab-pane>
+                      </n-tabs>
                     </n-card>
 
                     <n-modal
@@ -652,17 +682,30 @@
                     <n-card class="glass-card" title="服务配置" size="small">
                     <div class="settings-two-col">
                       <n-form class="settings-col" label-placement="left" label-width="180" :model="settingsForm">
-                        <n-form-item label="Sub2API-同步 API 地址">
+                        <n-form-item label="云端账号类型">
+                          <n-select
+                            v-model:value="settingsForm.remote_account_provider"
+                            :options="remoteAccountProviderOptions"
+                            @update:value="updateRemoteAccountProvider"
+                          />
+                        </n-form-item>
+                        <n-form-item v-if="settingsForm.remote_account_provider === 'sub2api'" label="Sub2API-同步 API 地址">
                           <n-input v-model:value="settingsForm.accounts_sync_api_url" />
                         </n-form-item>
-                        <n-form-item label="Sub2API-账号列表 API">
+                        <n-form-item v-if="settingsForm.remote_account_provider === 'sub2api'" label="Sub2API-账号列表 API">
                           <n-input v-model:value="settingsForm.accounts_list_api_base" />
                         </n-form-item>
-                        <n-form-item label="Sub2API-Bearer Token">
+                        <n-form-item v-if="settingsForm.remote_account_provider === 'sub2api'" label="Sub2API-Bearer Token">
                           <n-input v-model:value="settingsForm.accounts_sync_bearer_token" type="password" show-password-on="mousedown" />
                         </n-form-item>
-                        <n-form-item label="Timezone">
+                        <n-form-item v-if="settingsForm.remote_account_provider === 'sub2api'" label="Timezone">
                           <n-input v-model:value="settingsForm.accounts_list_timezone" placeholder="Asia/Shanghai" />
+                        </n-form-item>
+                        <n-form-item v-if="settingsForm.remote_account_provider === 'cliproxyapi'" label="CLIProxyAPI-管理地址">
+                          <n-input v-model:value="settingsForm.cliproxy_api_base" placeholder="http://127.0.0.1:8317/v0/management" />
+                        </n-form-item>
+                        <n-form-item v-if="settingsForm.remote_account_provider === 'cliproxyapi'" label="CLIProxyAPI-管理密钥">
+                          <n-input v-model:value="settingsForm.cliproxy_management_key" type="password" show-password-on="mousedown" />
                         </n-form-item>
                         <n-form-item label="校验 HTTPS 证书">
                           <n-switch v-model:value="settingsForm.openai_ssl_verify" />
@@ -681,6 +724,9 @@
                         </n-form-item>
                         <n-form-item label="批量测试 SSL 重试">
                           <n-input-number v-model:value="settingsForm.remote_test_ssl_retry" :min="0" :max="5" style="width: 220px" />
+                        </n-form-item>
+                        <n-form-item label="批量刷新并发">
+                          <n-input-number v-model:value="settingsForm.remote_refresh_concurrency" :min="1" :max="12" style="width: 220px" />
                         </n-form-item>
                       </n-form>
                     </div>

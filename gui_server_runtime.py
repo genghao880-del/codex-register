@@ -180,9 +180,10 @@ def _make_api_handler(service, index_html: str):
                 if path == "/api/data/sync":
                     payload = self._read_json_body()
                     emails = payload.get("emails") or []
+                    provider = str(payload.get("provider") or "").strip()
                     if not isinstance(emails, list):
                         raise ValueError("emails 必须为数组")
-                    self._ok(service.sync_selected_accounts(emails))
+                    self._ok(service.sync_selected_accounts(emails, provider))
                     return
 
                 if path == "/api/data/codex/export":
@@ -205,6 +206,14 @@ def _make_api_handler(service, index_html: str):
                     if not isinstance(ids, list):
                         raise ValueError("ids 必须为数组")
                     self._ok(service.batch_test_remote_accounts(ids))
+                    return
+
+                if path == "/api/remote/refresh-batch":
+                    payload = self._read_json_body()
+                    ids = payload.get("ids") or []
+                    if not isinstance(ids, list):
+                        raise ValueError("ids 必须为数组")
+                    self._ok(service.refresh_remote_tokens(ids))
                     return
 
                 if path == "/api/remote/revive-batch":

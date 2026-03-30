@@ -27,8 +27,8 @@ CodeX Register 是一个桌面化的 Web 控制台，用于统一管理注册流
 - 邮箱体系：支持 Cloudflare Temp Email、MailFree、CloudMail、Mail-Curl、Gmail IMAP 与 Microsoft Graph，支持 Graph 文件导入、轮询与 token 刷新。
 - SMS 管理：支持 HeroSMS 余额检查、国家下拉（含价格/库存）、国家过滤、手机号复用、自动国家优选。
 - 代理能力：支持固定 HTTP 代理与 FlClash 动态切节点（含延迟探测、批次共享节点、自动过滤不可用节点）。
-- 数据管理：本地 `accounts_*.json` 与 `accounts.txt` 汇总、备注、导出、同步远端。
-- 远端维护：支持批量测活、复活 token、批量删除、分组更新。
+- 数据管理：本地 `accounts_*.json` 导出文件管理，账号导入/云端维护独立到左侧“账号管理”。
+- 远端维护：支持 Sub2API / CLIProxyAPI 双云端账号源；均支持导入、批量测活、批量刷新、批量删除，Sub2API 额外支持复活与分组更新。
 
 ## 运行架构
 
@@ -88,7 +88,9 @@ python gui.py --mode browser --no-auto-open
 ## 界面说明
 
 - `工作台`：任务控制、实时统计（含 SMS 消耗/余额/阈值）。
-- `数据`：本地 JSON 与账户列表、远端同步/复活/删除。
+- `数据`：本地 `accounts_*.json` 导出文件管理。
+- `账号管理`：本地页提供 `导入到sub2api`、`导入到cpa` 两个按钮；并保留 `导出为CPA可用文件`。
+- `云端账号`：支持 Sub2API / CLIProxyAPI 双源（测活/刷新/删除），其中 Sub2API 额外支持复活与分组维护。
 - `邮箱设置`：MailFree / Gmail IMAP / Graph 设置，支持 Graph 文件导入与收件检查。
 - `SMS管理`：HeroSMS 开关、API Key、服务代码、国家价格下拉、余额刷新。
 - `服务设置`：并发、冷却、重试、网络与指纹相关配置。
@@ -189,9 +191,12 @@ python gui.py --mode browser --no-auto-open
 
 | 键名 | 类型 | 默认值 | 说明 |
 |---|---|---:|---|
+| `remote_account_provider` | string | `"sub2api"` | 云端账号类型：`sub2api` / `cliproxyapi` |
 | `accounts_sync_api_url` | string | `""` | 本地同步接口（需自行填写） |
 | `accounts_sync_bearer_token` | string | `""` | Bearer Token |
 | `accounts_list_api_base` | string | `""` | 远端列表 API 基地址（需自行填写） |
+| `cliproxy_api_base` | string | `""` | CLIProxyAPI Management API 地址（支持自动补全到 `/v0/management`） |
+| `cliproxy_management_key` | string | `""` | CLIProxyAPI 管理密钥（Authorization Bearer） |
 | `accounts_list_page_size` | int | `10` | 每页拉取条数 |
 | `accounts_list_fetch_workers` | int | `4` | 列表并发拉取线程数 |
 | `accounts_list_ssl_retry` | int | `3` | 列表 SSL 重试次数 |
@@ -199,6 +204,7 @@ python gui.py --mode browser --no-auto-open
 | `accounts_list_timezone` | string | `"Asia/Shanghai"` | 查询时区 |
 | `remote_test_concurrency` | int | `4` | 批量测活并发 |
 | `remote_test_ssl_retry` | int | `2` | 批量测活 SSL 重试 |
+| `remote_refresh_concurrency` | int | `4` | 批量刷新并发 |
 | `remote_revive_concurrency` | int | `4` | 批量复活并发 |
 
 ### 6) 安全与运行控制

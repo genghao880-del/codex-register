@@ -82,6 +82,7 @@ from gui_service_remote_test import (
     is_rate_limited_error as _remote_is_rate_limited_error,
     is_ssl_retryable_error as _remote_is_ssl_retryable_error,
     is_token_invalidated_error as _remote_is_token_invalidated_error,
+    refresh_remote_tokens as _remote_refresh_remote_tokens,
     refresh_api_success as _remote_refresh_api_success,
     revive_remote_tokens as _remote_revive_remote_tokens,
     set_remote_test_state as _remote_set_remote_test_state,
@@ -468,6 +469,51 @@ class RegisterService:
         return out
 
     @staticmethod
+    def _normalize_remote_account_provider(raw: Any) -> str:
+        val = str(raw or "sub2api").strip().lower()
+        if val in {"cliproxyapi", "cliproxy", "cli_proxy_api", "cpa"}:
+            return "cliproxyapi"
+        return "sub2api"
+
+    @staticmethod
+    def _normalize_cliproxy_management_base(raw: Any) -> str:
+        base = str(raw or "").strip()
+        if not base:
+            return ""
+        if not base.startswith("http://") and not base.startswith("https://"):
+            base = f"http://{base}"
+        base = base.rstrip("/")
+        marker = "/v0/management"
+        low = base.lower()
+        idx = low.find(marker)
+        if idx >= 0:
+            return base[: idx + len(marker)]
+        return f"{base}{marker}"
+
+    def _cliproxy_management_context(self) -> tuple[str, str, bool, str | None]:
+        raw_base = str(
+            self.cfg.get("cliproxy_api_base")
+            or self.cfg.get("accounts_list_api_base")
+            or ""
+        ).strip()
+        if not raw_base:
+            raise ValueError("请先填写 CLIProxyAPI 管理地址（cliproxy_api_base）")
+        base = self._normalize_cliproxy_management_base(raw_base)
+
+        raw_key = str(
+            self.cfg.get("cliproxy_management_key")
+            or self.cfg.get("accounts_sync_bearer_token")
+            or ""
+        ).strip()
+        if not raw_key:
+            raise ValueError("请先填写 CLIProxyAPI 管理密钥（cliproxy_management_key）")
+        auth = raw_key if raw_key.lower().startswith("bearer ") else f"Bearer {raw_key}"
+
+        verify_ssl = bool(self.cfg.get("openai_ssl_verify", True))
+        proxy_arg = str(self.cfg.get("proxy") or "").strip() or None
+        return base, auth, verify_ssl, proxy_arg
+
+    @staticmethod
     def _file_color_index(file_name: str, palette_size: int = 12) -> int:
         name = str(file_name or "").strip().lower()
         if not name:
@@ -788,15 +834,34 @@ class RegisterService:
             if not flc_group:
                 blockers.append("FlClash 已启用但策略组为空（flclash_group）")
 
-        sync_url = str(cfg.get("accounts_sync_api_url") or "").strip()
-        sync_token = str(cfg.get("accounts_sync_bearer_token") or "").strip()
-        list_base = str(cfg.get("accounts_list_api_base") or "").strip()
-        if not sync_url:
-            warnings.append("远端同步接口为空（accounts_sync_api_url）")
-        if not sync_token:
-            warnings.append("远端 Bearer Token 为空（accounts_sync_bearer_token）")
-        if not list_base:
-            warnings.append("远端列表接口为空（accounts_list_api_base）")
+        remote_provider = self._normalize_remote_account_provider(
+            cfg.get("remote_account_provider") or "sub2api"
+        )
+        if remote_provider == "sub2api":
+            sync_url = str(cfg.get("accounts_sync_api_url") or "").strip()
+            sync_token = str(cfg.get("accounts_sync_bearer_token") or "").strip()
+            list_base = str(cfg.get("accounts_list_api_base") or "").strip()
+            if not sync_url:
+                warnings.append("Sub2API 同步接口为空（accounts_sync_api_url）")
+            if not sync_token:
+                warnings.append("Sub2API Bearer Token 为空（accounts_sync_bearer_token）")
+            if not list_base:
+                warnings.append("Sub2API 列表接口为空（accounts_list_api_base）")
+        else:
+            cliproxy_base = str(
+                cfg.get("cliproxy_api_base")
+                or cfg.get("accounts_list_api_base")
+                or ""
+            ).strip()
+            cliproxy_key = str(
+                cfg.get("cliproxy_management_key")
+                or cfg.get("accounts_sync_bearer_token")
+                or ""
+            ).strip()
+            if not cliproxy_base:
+                warnings.append("CLIProxyAPI 管理地址为空（cliproxy_api_base）")
+            if not cliproxy_key:
+                warnings.append("CLIProxyAPI 管理密钥为空（cliproxy_management_key）")
 
         if self._to_int(cfg.get("concurrency"), 1, 1, 6) > 1 and not bool(
             cfg.get("register_random_fingerprint", True)
@@ -848,6 +913,9 @@ class RegisterService:
     def update_config(self, data: dict[str, Any], emit_log: bool = True) -> dict[str, Any]:
         with self._lock:
             cfg = dict(self.cfg)
+            old_remote_provider = self._normalize_remote_account_provider(
+                self.cfg.get("remote_account_provider") or "sub2api"
+            )
 
         if not isinstance(data, dict):
             data = {}
@@ -887,6 +955,13 @@ class RegisterService:
             cfg["remote_revive_concurrency"] = self._to_int(
                 data.get("remote_revive_concurrency"),
                 cfg.get("remote_revive_concurrency", 4),
+                1,
+                12,
+            )
+        if "remote_refresh_concurrency" in data:
+            cfg["remote_refresh_concurrency"] = self._to_int(
+                data.get("remote_refresh_concurrency"),
+                cfg.get("remote_refresh_concurrency", 4),
                 1,
                 12,
             )
@@ -998,6 +1073,9 @@ class RegisterService:
             "accounts_sync_api_url",
             "accounts_sync_bearer_token",
             "accounts_list_api_base",
+            "remote_account_provider",
+            "cliproxy_api_base",
+            "cliproxy_management_key",
             "accounts_list_timezone",
             "codex_export_dir",
         ]
@@ -1093,6 +1171,9 @@ class RegisterService:
         cfg["mail_service_provider"] = normalize_mail_provider(
             cfg.get("mail_service_provider") or "mailfree"
         )
+        cfg["remote_account_provider"] = self._normalize_remote_account_provider(
+            cfg.get("remote_account_provider") or "sub2api"
+        )
         mail_domains_raw = str(cfg.get("mail_domains") or "").strip()
         if mail_domains_raw:
             cfg["mail_domains"] = ",".join(
@@ -1134,6 +1215,16 @@ class RegisterService:
         cfg["accounts_list_page_size"] = 10
 
         with self._lock:
+            new_remote_provider = self._normalize_remote_account_provider(
+                cfg.get("remote_account_provider") or "sub2api"
+            )
+            if new_remote_provider != old_remote_provider:
+                self._remote_rows = []
+                self._remote_total = 0
+                self._remote_pages = 1
+                self._remote_email_counts = {}
+                self._remote_sync_status_ready = False
+                self._remote_test_state = {}
             self.cfg = cfg
             self._mail_client = None
             self._mail_client_sig = None
@@ -1180,6 +1271,13 @@ class RegisterService:
         os.environ["MAIL_SERVICE_PROVIDER"] = normalize_mail_provider(
             self.cfg.get("mail_service_provider") or "mailfree"
         )
+        os.environ["REMOTE_ACCOUNT_PROVIDER"] = self._normalize_remote_account_provider(
+            self.cfg.get("remote_account_provider") or "sub2api"
+        )
+        os.environ["CLIPROXY_API_BASE"] = self._normalize_cliproxy_management_base(
+            self.cfg.get("cliproxy_api_base") or ""
+        )
+        os.environ["CLIPROXY_MANAGEMENT_KEY"] = str(self.cfg.get("cliproxy_management_key") or "")
         os.environ["GRAPH_ACCOUNTS_FILE"] = str(self.cfg.get("graph_accounts_file") or "").strip()
         os.environ["GRAPH_TENANT"] = str(self.cfg.get("graph_tenant") or "common").strip()
         os.environ["GRAPH_FETCH_MODE"] = str(self.cfg.get("graph_fetch_mode") or "graph_api").strip()
@@ -3026,8 +3124,12 @@ class RegisterService:
     def delete_json_files(self, paths: list[str]) -> dict[str, Any]:
         return _data_delete_json_files(self, paths)
 
-    def sync_selected_accounts(self, emails: list[str]) -> dict[str, Any]:
-        return _data_sync_selected_accounts(self, emails)
+    def sync_selected_accounts(
+        self,
+        emails: list[str],
+        provider_override: str = "",
+    ) -> dict[str, Any]:
+        return _data_sync_selected_accounts(self, emails, provider_override)
 
     def export_codex_accounts(self, emails: list[str]) -> dict[str, Any]:
         return _data_export_codex_accounts(self, emails)
@@ -3071,6 +3173,113 @@ class RegisterService:
             k = self._remote_name_key(row.get("name"))
             row["is_dup"] = bool(k and counts.get(k, 0) > 1)
 
+    def _fetch_remote_all_pages_cliproxy(self, search: str = "") -> dict[str, Any]:
+        base, auth, verify_ssl, proxy_arg = self._cliproxy_management_context()
+        headers = {
+            "Accept": "application/json",
+            "Authorization": auth,
+        }
+        url = f"{base.rstrip('/')}/auth-files"
+        code, text = _http_get(
+            url,
+            headers,
+            verify_ssl=verify_ssl,
+            timeout=90,
+            proxy=proxy_arg,
+        )
+        if not (200 <= code < 300):
+            snippet = (text or "")[:400].replace("\n", " ")
+            raise RuntimeError(f"HTTP {code}: {snippet}")
+
+        try:
+            payload = json.loads(text) if (text or "").strip() else {}
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"JSON 解析失败: {e}") from e
+
+        items = payload.get("files") if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            items = []
+
+        search_kw = str(search or "").strip().lower()
+        with self._lock:
+            test_state_snapshot = dict(self._remote_test_state)
+
+        rows: list[dict[str, Any]] = []
+        for idx, it in enumerate(items):
+            if not isinstance(it, dict):
+                continue
+            raw_name = str(it.get("name") or "").strip()
+            aid = str(it.get("id") or raw_name or f"auth-{idx + 1}").strip()
+            email = str(it.get("email") or "").strip()
+            label = str(it.get("label") or "").strip()
+            display_name = email or label or raw_name or aid
+            provider = str(it.get("provider") or it.get("type") or "").strip()
+            status = str(it.get("status") or "").strip()
+            if bool(it.get("disabled")):
+                status = "disabled"
+            elif bool(it.get("unavailable")):
+                status = "unavailable"
+
+            if search_kw:
+                haystack = " ".join(
+                    [
+                        display_name,
+                        raw_name,
+                        email,
+                        label,
+                        aid,
+                        provider,
+                    ]
+                ).lower()
+                if search_kw not in haystack:
+                    continue
+
+            rows.append(
+                {
+                    "key": f"{aid}-{idx}",
+                    "id": aid,
+                    "name": display_name,
+                    "platform": provider,
+                    "type": str(it.get("account_type") or it.get("type") or ""),
+                    "status": status or "ready",
+                    "groups": str(it.get("account") or "-"),
+                    "u5h": "--",
+                    "u7d": "--",
+                    "test_status": str(
+                        (test_state_snapshot.get(aid) or {}).get("status") or "未测试"
+                    ),
+                    "test_result": str(
+                        (test_state_snapshot.get(aid) or {}).get("result") or "-"
+                    ),
+                    "test_at": str(
+                        (test_state_snapshot.get(aid) or {}).get("at") or "-"
+                    ),
+                    "is_dup": False,
+                    "auth_index": str(it.get("auth_index") or ""),
+                    "file_name": raw_name or aid,
+                    "runtime_only": bool(it.get("runtime_only")),
+                    "disabled": bool(it.get("disabled")),
+                    "unavailable": bool(it.get("unavailable")),
+                    "status_message": str(it.get("status_message") or ""),
+                    "provider_source": "cliproxyapi",
+                }
+            )
+
+        with self._lock:
+            self._remote_rows = rows
+            self._remote_total = len(rows)
+            self._remote_pages = 1
+            self._refresh_remote_rows_derived_locked()
+            self._remote_sync_status_ready = True
+
+        self.log(f"CLIProxyAPI 列表拉取完成：{len(rows)} 条")
+        return {
+            "items": rows,
+            "total": len(rows),
+            "pages": 1,
+            "loaded": len(rows),
+        }
+
     def fetch_remote_all_pages(self, search: str = "") -> dict[str, Any]:
         with self._lock:
             if self._remote_busy:
@@ -3089,6 +3298,12 @@ class RegisterService:
             test_state_snapshot = dict(self._remote_test_state)
 
         try:
+            provider = self._normalize_remote_account_provider(
+                self.cfg.get("remote_account_provider") or "sub2api"
+            )
+            if provider == "cliproxyapi":
+                return self._fetch_remote_all_pages_cliproxy(search)
+
             tok = str(self.cfg.get("accounts_sync_bearer_token") or "").strip()
             base = str(self.cfg.get("accounts_list_api_base") or "").strip()
             if not tok:
@@ -3347,6 +3562,9 @@ class RegisterService:
                 "total": self._remote_total,
                 "pages": self._remote_pages,
                 "loaded": len(rows),
+                "provider": self._normalize_remote_account_provider(
+                    self.cfg.get("remote_account_provider") or "sub2api"
+                ),
                 "ready": self._remote_sync_status_ready,
                 "testing": self._remote_test_busy,
                 "test_total": int(self._remote_test_stats.get("total", 0)),
@@ -3416,8 +3634,111 @@ class RegisterService:
     def batch_test_remote_accounts(self, ids: list[Any]) -> dict[str, Any]:
         return _remote_batch_test_remote_accounts(self, ids)
 
+    def refresh_remote_tokens(self, ids: list[Any]) -> dict[str, Any]:
+        return _remote_refresh_remote_tokens(self, ids)
+
     def revive_remote_tokens(self, ids: list[Any]) -> dict[str, Any]:
         return _remote_revive_remote_tokens(self, ids)
+
+    def _delete_remote_accounts_cliproxy(self, ordered_ids: list[str]) -> dict[str, Any]:
+        base, auth, verify_ssl, proxy_arg = self._cliproxy_management_context()
+        headers = {
+            "Accept": "application/json",
+            "Authorization": auth,
+        }
+
+        with self._lock:
+            row_by_id = {
+                str(row.get("id") or "").strip(): dict(row)
+                for row in self._remote_rows
+            }
+
+        ok = 0
+        fail = 0
+        deleted_ids: set[str] = set()
+        results: list[dict[str, Any]] = []
+
+        for i, aid in enumerate(ordered_ids, start=1):
+            row = row_by_id.get(aid) or {}
+            file_name = str(row.get("file_name") or row.get("name") or aid).strip()
+            runtime_only = bool(row.get("runtime_only"))
+            if runtime_only:
+                fail += 1
+                summary = "runtime_only 账号无法通过文件接口删除"
+                results.append({"id": aid, "success": False, "summary": summary})
+                self.log(f"[批量删除-CLIProxyAPI] id={aid} 失败: {summary}")
+                continue
+
+            self.log(f"[批量删除-CLIProxyAPI] 开始 {i}/{len(ordered_ids)}: id={aid} name={file_name}")
+            q = urllib.parse.urlencode({"name": file_name})
+            url = f"{base.rstrip('/')}/auth-files?{q}"
+            code, text = _http_delete(
+                url,
+                headers,
+                verify_ssl=verify_ssl,
+                timeout=60,
+                proxy=proxy_arg,
+            )
+
+            success = False
+            summary = ""
+            if 200 <= code < 300:
+                if (text or "").strip():
+                    try:
+                        j = json.loads(text)
+                    except Exception:
+                        j = {}
+                    if isinstance(j, dict) and str(j.get("status") or "").lower() in {"ok", "partial"}:
+                        success = True
+                        summary = "已删除"
+                    elif isinstance(j, dict) and j.get("error"):
+                        summary = str(j.get("error") or "删除失败")
+                    else:
+                        success = True
+                        summary = "已删除"
+                else:
+                    success = True
+                    summary = "已删除"
+            else:
+                snippet = (text or "")[:220].replace("\n", " ")
+                summary = f"HTTP {code}: {snippet}"
+
+            if success:
+                ok += 1
+                deleted_ids.add(aid)
+                self.log(f"[批量删除-CLIProxyAPI] id={aid} 成功")
+            else:
+                fail += 1
+                self.log(f"[批量删除-CLIProxyAPI] id={aid} 失败: {summary}")
+
+            results.append(
+                {
+                    "id": aid,
+                    "success": success,
+                    "summary": summary,
+                }
+            )
+
+        if deleted_ids:
+            with self._lock:
+                self._remote_rows = [
+                    row
+                    for row in self._remote_rows
+                    if str(row.get("id") or "").strip() not in deleted_ids
+                ]
+                for aid in deleted_ids:
+                    self._remote_test_state.pop(aid, None)
+                self._refresh_remote_rows_derived_locked()
+                self._remote_total = max(0, int(self._remote_total) - len(deleted_ids))
+
+        self.log(f"[批量删除-CLIProxyAPI] 结束：成功 {ok}，失败 {fail}")
+        return {
+            "ok": ok,
+            "fail": fail,
+            "total": len(ordered_ids),
+            "deleted": sorted(deleted_ids),
+            "results": results,
+        }
 
     def delete_remote_accounts(self, ids: list[Any]) -> dict[str, Any]:
         """批量删除远端账号。"""
@@ -3437,6 +3758,12 @@ class RegisterService:
                 raise RuntimeError("服务端列表拉取中，请稍后再删")
             if self._remote_test_busy:
                 raise RuntimeError("批量测试进行中，请稍后再删")
+
+        remote_provider = self._normalize_remote_account_provider(
+            self.cfg.get("remote_account_provider") or "sub2api"
+        )
+        if remote_provider == "cliproxyapi":
+            return self._delete_remote_accounts_cliproxy(ordered_ids)
 
         tok = str(self.cfg.get("accounts_sync_bearer_token") or "").strip()
         base = str(self.cfg.get("accounts_list_api_base") or "").strip()
@@ -3536,6 +3863,12 @@ class RegisterService:
 
     def remote_list_groups(self) -> dict[str, Any]:
         """获取管理端分组列表。"""
+        remote_provider = self._normalize_remote_account_provider(
+            self.cfg.get("remote_account_provider") or "sub2api"
+        )
+        if remote_provider == "cliproxyapi":
+            return {"items": [], "total": 0}
+
         tok = str(self.cfg.get("accounts_sync_bearer_token") or "").strip()
         base = str(self.cfg.get("accounts_list_api_base") or "").strip()
         tz = str(
@@ -3625,6 +3958,12 @@ class RegisterService:
 
     def remote_bulk_update_groups(self, account_ids: list[Any], group_ids: list[Any]) -> dict[str, Any]:
         """批量给服务端账号分配分组。"""
+        remote_provider = self._normalize_remote_account_provider(
+            self.cfg.get("remote_account_provider") or "sub2api"
+        )
+        if remote_provider == "cliproxyapi":
+            raise ValueError("CLIProxyAPI 不支持分组接口")
+
         ordered_account_ids: list[int] = []
         seen_accounts: set[int] = set()
         for raw in account_ids:

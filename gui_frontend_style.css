@@ -263,6 +263,10 @@
       align-items: center;
     }
 
+    .remote-provider-tabs {
+      margin-bottom: 8px;
+    }
+
     .remote-search {
       width: 220px;
       min-width: 180px;

@@ -27,6 +27,13 @@ _OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _OPENAI_REDIRECT_URI = "http://localhost:1455/auth/callback"
 
 
+def _normalize_remote_account_provider(raw: Any) -> str:
+    val = str(raw or "sub2api").strip().lower()
+    if val in {"cliproxyapi", "cliproxy", "cli_proxy_api", "cpa"}:
+        return "cliproxyapi"
+    return "sub2api"
+
+
 def consume_test_event_stream(resp) -> tuple[bool, str, str]:
     """解析测试接口 SSE 流，返回 (是否成功, 摘要文本, 错误信息)。"""
     pending = ""
@@ -632,6 +639,170 @@ def set_remote_test_state(
             row["test_at"] = state["at"]
 
 
+def _batch_test_remote_accounts_cliproxy(service, ordered_ids: list[str]) -> dict[str, Any]:
+    with service._lock:
+        if service._remote_busy:
+            raise RuntimeError("服务端列表拉取中，请稍后再测")
+        if service._remote_test_busy:
+            raise RuntimeError("批量测试进行中，请稍候")
+        service._remote_test_busy = True
+        service._remote_test_stats = {
+            "total": len(ordered_ids),
+            "done": 0,
+            "ok": 0,
+            "fail": 0,
+        }
+
+    ok = 0
+    fail = 0
+    results: list[dict[str, Any]] = []
+
+    try:
+        base, auth, verify_ssl, proxy_arg = service._cliproxy_management_context()
+        headers = {
+            "Accept": "application/json",
+            "Authorization": auth,
+        }
+        with service._lock:
+            row_by_id = {
+                str(r.get("id") or "").strip(): dict(r)
+                for r in service._remote_rows
+            }
+
+        total = len(ordered_ids)
+        worker_count = min(
+            total,
+            service._to_int(service.cfg.get("remote_test_concurrency"), 4, 1, 12),
+        )
+        state_lock = threading.Lock()
+
+        def _run_one(aid: str) -> tuple[bool, str, int]:
+            t0 = time.time()
+            row = row_by_id.get(aid) or {}
+            file_name = str(row.get("file_name") or row.get("name") or aid).strip()
+
+            if not file_name:
+                cost_ms = int((time.time() - t0) * 1000)
+                return False, "缺少账号文件名", cost_ms
+
+            if bool(row.get("disabled")):
+                cost_ms = int((time.time() - t0) * 1000)
+                return False, "账号已禁用", cost_ms
+
+            if bool(row.get("unavailable")):
+                cost_ms = int((time.time() - t0) * 1000)
+                return False, "账号不可用", cost_ms
+
+            q = urllib.parse.urlencode({"name": file_name})
+            url = f"{base.rstrip('/')}/auth-files/models?{q}"
+            code, text = _http_get(
+                url,
+                headers,
+                verify_ssl=verify_ssl,
+                timeout=90,
+                proxy=proxy_arg,
+            )
+
+            summary = ""
+            success = False
+            if 200 <= code < 300:
+                try:
+                    payload = json.loads(text) if (text or "").strip() else {}
+                except Exception:
+                    payload = {}
+                models = payload.get("models") if isinstance(payload, dict) else []
+                if isinstance(models, list):
+                    summary = f"检查通过，模型 {len(models)} 个"
+                else:
+                    summary = "检查通过"
+                success = True
+            else:
+                snippet = (text or "")[:220].replace("\n", " ")
+                summary = f"HTTP {code}: {snippet}"
+                if code in {401, 403}:
+                    summary = "管理密钥无效或无权限"
+
+            cost_ms = int((time.time() - t0) * 1000)
+            return success, summary, cost_ms
+
+        def _worker(worker_no: int, queue: Queue[str]) -> None:
+            nonlocal ok, fail
+            while True:
+                try:
+                    aid = queue.get_nowait()
+                except Empty:
+                    return
+
+                service.log(f"[批量测试-CLIProxyAPI-W{worker_no}] 开始 id={aid}")
+                success, summary, cost_ms = _run_one(aid)
+                set_remote_test_state(
+                    service,
+                    aid,
+                    status_text="成功" if success else "失败",
+                    summary=summary,
+                    duration_ms=cost_ms,
+                )
+
+                with state_lock:
+                    if success:
+                        ok += 1
+                    else:
+                        fail += 1
+                    done = ok + fail
+                    ok_now = ok
+                    fail_now = fail
+                    results.append(
+                        {
+                            "id": aid,
+                            "success": success,
+                            "summary": summary,
+                            "duration_ms": cost_ms,
+                        }
+                    )
+
+                with service._lock:
+                    service._remote_test_stats = {
+                        "total": total,
+                        "done": done,
+                        "ok": ok_now,
+                        "fail": fail_now,
+                    }
+
+                if success:
+                    service.log(f"[批量测试-CLIProxyAPI-W{worker_no}] id={aid} 成功 ({cost_ms}ms)")
+                else:
+                    service.log(f"[批量测试-CLIProxyAPI-W{worker_no}] id={aid} 失败 ({cost_ms}ms): {summary}")
+                service.log(f"[批量测试-CLIProxyAPI] 进度 {done}/{total} · 成功 {ok_now} · 失败 {fail_now}")
+                queue.task_done()
+
+        q: Queue[str] = Queue()
+        for aid in ordered_ids:
+            q.put(aid)
+
+        workers: list[threading.Thread] = []
+        for i in range(1, worker_count + 1):
+            t = threading.Thread(target=_worker, args=(i, q), daemon=True)
+            workers.append(t)
+            t.start()
+
+        for t in workers:
+            t.join()
+
+        order_map = {aid: idx for idx, aid in enumerate(ordered_ids)}
+        results.sort(key=lambda x: order_map.get(str(x.get("id") or ""), 10**9))
+
+        service.log(f"[批量测试-CLIProxyAPI] 结束：成功 {ok}，失败 {fail}")
+        return {
+            "ok": ok,
+            "fail": fail,
+            "total": len(ordered_ids),
+            "results": results,
+        }
+    finally:
+        with service._lock:
+            service._remote_test_busy = False
+
+
 def batch_test_remote_accounts(service, ids: list[Any]) -> dict[str, Any]:
     """批量测试远端账号（按给定 id 列表顺序）。"""
     ordered_ids: list[str] = []
@@ -644,6 +815,12 @@ def batch_test_remote_accounts(service, ids: list[Any]) -> dict[str, Any]:
         ordered_ids.append(aid)
     if not ordered_ids:
         raise ValueError("请先选择要测试的账号")
+
+    remote_provider = _normalize_remote_account_provider(
+        (service.cfg or {}).get("remote_account_provider") or "sub2api"
+    )
+    if remote_provider == "cliproxyapi":
+        return _batch_test_remote_accounts_cliproxy(service, ordered_ids)
 
     with service._lock:
         if service._remote_busy:
@@ -868,6 +1045,293 @@ def batch_test_remote_accounts(service, ids: list[Any]) -> dict[str, Any]:
             service._remote_test_busy = False
 
 
+def _refresh_remote_tokens_cliproxy(service, ordered_ids: list[str]) -> dict[str, Any]:
+    with service._lock:
+        if service._remote_busy:
+            raise RuntimeError("服务端列表拉取中，请稍后再试")
+        if service._remote_test_busy:
+            raise RuntimeError("批量测试进行中，请稍后再试")
+
+    base, auth, verify_ssl, proxy_arg = service._cliproxy_management_context()
+    headers = {
+        "Accept": "application/json",
+        "Authorization": auth,
+    }
+    worker_count = min(
+        len(ordered_ids),
+        service._to_int(
+            service.cfg.get("remote_refresh_concurrency", service.cfg.get("remote_revive_concurrency", 4)),
+            4,
+            1,
+            12,
+        ),
+    )
+
+    with service._lock:
+        row_by_id = {
+            str(r.get("id") or "").strip(): dict(r)
+            for r in service._remote_rows
+        }
+
+    ok = 0
+    fail = 0
+    state_lock = threading.Lock()
+    results: list[dict[str, Any]] = []
+
+    def _run_one(aid: str) -> dict[str, Any]:
+        t0 = time.time()
+        row = row_by_id.get(aid) or {}
+        file_name = str(row.get("file_name") or row.get("name") or aid).strip()
+        if not file_name:
+            cost_ms = int((time.time() - t0) * 1000)
+            return {
+                "id": aid,
+                "success": False,
+                "detail": "缺少账号文件名",
+                "api": "",
+                "duration_ms": cost_ms,
+            }
+        if bool(row.get("runtime_only")):
+            cost_ms = int((time.time() - t0) * 1000)
+            return {
+                "id": aid,
+                "success": False,
+                "detail": "runtime_only 账号无法执行文件级刷新",
+                "api": "",
+                "duration_ms": cost_ms,
+            }
+
+        q = urllib.parse.urlencode({"name": file_name})
+        url = f"{base.rstrip('/')}/auth-files/models?{q}"
+        code, text = _http_get(
+            url,
+            headers,
+            verify_ssl=verify_ssl,
+            timeout=90,
+            proxy=proxy_arg,
+        )
+        cost_ms = int((time.time() - t0) * 1000)
+
+        if 200 <= code < 300:
+            try:
+                payload = json.loads(text) if (text or "").strip() else {}
+            except Exception:
+                payload = {}
+            models = payload.get("models") if isinstance(payload, dict) else []
+            if isinstance(models, list):
+                detail = f"刷新完成，模型 {len(models)} 个"
+            else:
+                detail = "刷新完成"
+            return {
+                "id": aid,
+                "success": True,
+                "detail": detail,
+                "api": "GET /auth-files/models",
+                "duration_ms": cost_ms,
+            }
+
+        snippet = (text or "")[:220].replace("\n", " ")
+        detail = f"HTTP {code}: {snippet}"
+        if code in {401, 403}:
+            detail = "管理密钥无效或无权限"
+        return {
+            "id": aid,
+            "success": False,
+            "detail": detail,
+            "api": "GET /auth-files/models",
+            "duration_ms": cost_ms,
+        }
+
+    service.log(f"[刷新-CLIProxyAPI] 启动：账号 {len(ordered_ids)}，并发 {worker_count}")
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_map = {executor.submit(_run_one, aid): aid for aid in ordered_ids}
+        for fut in as_completed(future_map):
+            aid = future_map[fut]
+            try:
+                item = fut.result()
+            except Exception as e:
+                item = {
+                    "id": aid,
+                    "success": False,
+                    "detail": str(e),
+                    "api": "GET /auth-files/models",
+                    "duration_ms": 0,
+                }
+
+            success = bool(item.get("success"))
+            detail = str(item.get("detail") or "-")
+            cost_ms = int(item.get("duration_ms") or 0)
+            set_remote_test_state(
+                service,
+                aid,
+                status_text="已刷新" if success else "刷新失败",
+                summary=detail,
+                duration_ms=cost_ms,
+            )
+
+            with state_lock:
+                results.append(item)
+                if success:
+                    ok += 1
+                else:
+                    fail += 1
+
+    order_map = {aid: idx for idx, aid in enumerate(ordered_ids)}
+    results.sort(key=lambda x: order_map.get(str(x.get("id") or ""), 10**9))
+    service.log(f"[刷新-CLIProxyAPI] 结束：成功 {ok}，失败 {fail}")
+    return {
+        "ok": ok,
+        "fail": fail,
+        "total": len(ordered_ids),
+        "api_summary": [{"api": "GET /auth-files/models", "count": ok}],
+        "concurrency": worker_count,
+        "results": results,
+    }
+
+
+def refresh_remote_tokens(service, ids: list[Any]) -> dict[str, Any]:
+    """批量调用管理端刷新接口（不限当前测试状态）。"""
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for raw in ids:
+        aid = str(raw).strip()
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        ordered_ids.append(aid)
+    if not ordered_ids:
+        raise ValueError("请先选择要刷新的账号")
+
+    remote_provider = _normalize_remote_account_provider(
+        (service.cfg or {}).get("remote_account_provider") or "sub2api"
+    )
+    if remote_provider == "cliproxyapi":
+        return _refresh_remote_tokens_cliproxy(service, ordered_ids)
+
+    with service._lock:
+        if service._remote_busy:
+            raise RuntimeError("服务端列表拉取中，请稍后再试")
+        if service._remote_test_busy:
+            raise RuntimeError("批量测试进行中，请稍后再试")
+
+    tok = str(service.cfg.get("accounts_sync_bearer_token") or "").strip()
+    base = str(service.cfg.get("accounts_list_api_base") or "").strip()
+    if not tok:
+        raise ValueError("请先填写 Bearer Token")
+    if not base:
+        raise ValueError("请先填写账号列表 API")
+
+    verify_ssl = bool(service.cfg.get("openai_ssl_verify", True))
+    proxy_arg = str(service.cfg.get("proxy") or "").strip() or None
+    auth = tok if tok.lower().startswith("bearer ") else f"Bearer {tok}"
+
+    worker_count = min(
+        len(ordered_ids),
+        service._to_int(
+            service.cfg.get("remote_refresh_concurrency", service.cfg.get("remote_revive_concurrency", 4)),
+            4,
+            1,
+            12,
+        ),
+    )
+
+    service.log(f"[刷新] 启动：账号 {len(ordered_ids)}，并发 {worker_count}")
+
+    ok = 0
+    fail = 0
+    state_lock = threading.Lock()
+    api_used: dict[str, int] = {}
+    results: list[dict[str, Any]] = []
+
+    def _run_one(aid: str) -> dict[str, Any]:
+        t0 = time.time()
+        refreshed, detail, api = try_refresh_remote_token(
+            service,
+            aid,
+            base=base,
+            auth=auth,
+            verify_ssl=verify_ssl,
+            proxy_arg=proxy_arg,
+        )
+        cost_ms = int((time.time() - t0) * 1000)
+        detail_text = str(detail or "").strip() or "-"
+        if refreshed:
+            set_remote_test_state(
+                service,
+                aid,
+                status_text="已刷新",
+                summary=detail_text,
+                duration_ms=cost_ms,
+            )
+            service.log(
+                f"[刷新] id={aid} 成功"
+                + (f" · 接口 {api}" if api else "")
+                + (f" · {detail_text}" if detail_text else "")
+            )
+            return {
+                "id": aid,
+                "success": True,
+                "detail": detail_text,
+                "api": api or "REMOTE_REFRESH_API",
+                "duration_ms": cost_ms,
+            }
+
+        set_remote_test_state(
+            service,
+            aid,
+            status_text="刷新失败",
+            summary=detail_text,
+            duration_ms=cost_ms,
+        )
+        service.log(
+            f"[刷新] id={aid} 失败"
+            + (f" · 接口 {api}" if api else "")
+            + (f" · {detail_text}" if detail_text else "")
+        )
+        return {
+            "id": aid,
+            "success": False,
+            "detail": detail_text,
+            "api": api or "",
+            "duration_ms": cost_ms,
+        }
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_map = {executor.submit(_run_one, aid): aid for aid in ordered_ids}
+        for fut in as_completed(future_map):
+            aid = future_map[fut]
+            try:
+                item = fut.result()
+            except Exception as e:
+                item = {"id": aid, "success": False, "detail": str(e), "api": ""}
+
+            with state_lock:
+                results.append(item)
+                if item.get("success"):
+                    ok += 1
+                    api = str(item.get("api") or "").strip()
+                    if api:
+                        api_used[api] = int(api_used.get(api, 0)) + 1
+                else:
+                    fail += 1
+
+    order_map = {aid: idx for idx, aid in enumerate(ordered_ids)}
+    results.sort(key=lambda x: order_map.get(str(x.get("id") or ""), 10**9))
+    api_summary = [
+        {"api": k, "count": int(v)}
+        for k, v in sorted(api_used.items(), key=lambda x: (-int(x[1]), str(x[0])))
+    ]
+    service.log(f"[刷新] 结束：成功 {ok}，失败 {fail}")
+    return {
+        "ok": ok,
+        "fail": fail,
+        "total": len(ordered_ids),
+        "api_summary": api_summary,
+        "concurrency": worker_count,
+        "results": results,
+    }
+
+
 def revive_remote_tokens(service, ids: list[Any]) -> dict[str, Any]:
     """批量刷新所选账号 token（用于 Token 过期复活）。"""
     ordered_ids: list[str] = []
@@ -880,6 +1344,13 @@ def revive_remote_tokens(service, ids: list[Any]) -> dict[str, Any]:
         ordered_ids.append(aid)
     if not ordered_ids:
         raise ValueError("请先选择要复活的账号")
+
+    remote_provider = _normalize_remote_account_provider(
+        (service.cfg or {}).get("remote_account_provider") or "sub2api"
+    )
+    if remote_provider == "cliproxyapi":
+        # CLIProxyAPI 暂无独立“复活”接口，使用批量刷新逻辑代替。
+        return refresh_remote_tokens(service, ordered_ids)
 
     with service._lock:
         if service._remote_busy:
@@ -1106,6 +1577,7 @@ def revive_remote_tokens(service, ids: list[Any]) -> dict[str, Any]:
 __all__ = [
     "batch_test_remote_accounts",
     "consume_test_event_stream",
+    "refresh_remote_tokens",
     "is_account_deactivated_error",
     "is_rate_limited_error",
     "is_ssl_retryable_error",

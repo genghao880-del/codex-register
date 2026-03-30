@@ -2,6 +2,7 @@
         const menuOptions = [
           { label: "工作台", key: "dash" },
           { label: "数据", key: "data" },
+          { label: "账号管理", key: "accounts" },
           { label: "邮箱设置", key: "mail" },
           { label: "SMS管理", key: "sms" },
           { label: "服务设置", key: "settings" },
@@ -143,9 +144,13 @@
           flclash_delay_retry: 1,
           remote_test_concurrency: 4,
           remote_test_ssl_retry: 2,
+          remote_refresh_concurrency: 4,
           accounts_sync_api_url: "",
           accounts_sync_bearer_token: "",
           accounts_list_api_base: "",
+          remote_account_provider: "sub2api",
+          cliproxy_api_base: "",
+          cliproxy_management_key: "",
           accounts_list_timezone: "Asia/Shanghai",
           codex_export_dir: ""
         });
@@ -162,6 +167,7 @@
           remote_groups: false,
           remote_group_update: false,
           remote_test: false,
+          remote_refresh: false,
           remote_revive: false,
           remote_delete: false,
           run_stats_clear: false,
@@ -188,6 +194,7 @@
         const accountSelection = Vue.ref([]);
         const accountBatchFiles = Vue.ref([]);
         const accountInfo = Vue.reactive({ total: 0, path: "accounts.txt", file_options: [] });
+        const accountManageTab = Vue.ref("local");
 
         const remoteRows = Vue.ref([]);
         const remoteSelection = Vue.ref([]);
@@ -500,25 +507,28 @@
         });
 
         const remoteInfoText = Vue.computed(() => {
+          const providerLabel = normalizeRemoteAccountProvider(settingsForm.remote_account_provider) === "cliproxyapi"
+            ? "CLIProxyAPI"
+            : "Sub2API";
           if (status.remote_test_busy || loading.remote_test) {
             const t = Number(remoteMeta.test_total || 0);
             const d = Number(remoteMeta.test_done || 0);
             const ok = Number(remoteMeta.test_ok || 0);
             const fail = Number(remoteMeta.test_fail || 0);
-            return `批量测试中 · 进度 ${d}/${t} · 成功 ${ok} · 失败 ${fail}`;
+            return `${providerLabel} · 批量测试中 · 进度 ${d}/${t} · 成功 ${ok} · 失败 ${fail}`;
           }
           if (status.remote_busy || loading.remote) {
-            if (!remoteMeta.loaded) return "正在拉取第 1 页...";
-            return `正在拉取中 · 已展示 ${remoteMeta.loaded} 条 · 预计 ${remoteMeta.pages} 页`;
+            if (!remoteMeta.loaded) return `${providerLabel} · 正在拉取第 1 页...`;
+            return `${providerLabel} · 正在拉取中 · 已展示 ${remoteMeta.loaded} 条 · 预计 ${remoteMeta.pages} 页`;
           }
           if (!remoteMeta.loaded) {
             const t = Number(remoteMeta.test_total || 0);
             if (t > 0) {
-              return `未加载列表 · 最近测试 成功 ${remoteMeta.test_ok} · 失败 ${remoteMeta.test_fail}`;
+              return `${providerLabel} · 未加载列表 · 最近测试 成功 ${remoteMeta.test_ok} · 失败 ${remoteMeta.test_fail}`;
             }
-            return "未加载";
+            return `${providerLabel} · 未加载`;
           }
-          const base = `已拉取 ${remoteMeta.pages} 页 · 共 ${remoteMeta.total} 条 · 已显示 ${remoteMeta.loaded} 条`;
+          const base = `${providerLabel} · 已拉取 ${remoteMeta.pages} 页 · 共 ${remoteMeta.total} 条 · 已显示 ${remoteMeta.loaded} 条`;
           const t = Number(remoteMeta.test_total || 0);
           if (t > 0) {
             return `${base} · 最近测试 成功 ${remoteMeta.test_ok} · 失败 ${remoteMeta.test_fail}`;
@@ -823,6 +833,14 @@
           return "mailfree";
         }
 
+        function normalizeRemoteAccountProvider(raw) {
+          const val = String(raw || "sub2api").trim().toLowerCase();
+          if (["cliproxyapi", "cliproxy", "cli_proxy_api", "cpa"].includes(val)) {
+            return "cliproxyapi";
+          }
+          return "sub2api";
+        }
+
         function remoteRowClassName(row) {
           const classes = [];
           if (row && row.is_dup) classes.push("row-dup-strong");
@@ -830,7 +848,7 @@
           if (s === "封禁") classes.push("row-test-ban");
           else if (s === "Token过期") classes.push("row-test-token");
           else if (s === "429限流") classes.push("row-test-429");
-          else if (s === "已复活") classes.push("row-test-revived");
+          else if (s === "已复活" || s === "已刷新") classes.push("row-test-revived");
           else if (s && s !== "成功" && s !== "未测试" && s !== "未测") classes.push("row-test-fail");
           return classes.join(" ");
         }
@@ -850,6 +868,11 @@
         const graphFetchModeOptions = [
           { label: "Graph API 取件", value: "graph_api" },
           { label: "IMAP XOAUTH2 取件", value: "imap_xoauth2" }
+        ];
+
+        const remoteAccountProviderOptions = [
+          { label: "Sub2API", value: "sub2api" },
+          { label: "CLIProxyAPI", value: "cliproxyapi" }
         ];
 
         const flclashProbeColumns = [
@@ -1008,6 +1031,20 @@
                   { default: () => "已复活" }
                 );
               }
+              if (s === "已刷新") {
+                return Vue.h(
+                  naive.NTag,
+                  { type: "success", size: "small", bordered: false },
+                  { default: () => "已刷新" }
+                );
+              }
+              if (s === "刷新失败") {
+                return Vue.h(
+                  naive.NTag,
+                  { type: "error", size: "small", bordered: false },
+                  { default: () => "刷新失败" }
+                );
+              }
               if (s === "失败") {
                 return Vue.h(
                   naive.NTag,
@@ -1125,9 +1162,13 @@
           settingsForm.flclash_delay_retry = Number(cfg.flclash_delay_retry || 1);
           settingsForm.remote_test_concurrency = Number(cfg.remote_test_concurrency || 4);
           settingsForm.remote_test_ssl_retry = Number(cfg.remote_test_ssl_retry || 2);
+          settingsForm.remote_refresh_concurrency = Number(cfg.remote_refresh_concurrency || 4);
           settingsForm.accounts_sync_api_url = String(cfg.accounts_sync_api_url || "");
           settingsForm.accounts_sync_bearer_token = String(cfg.accounts_sync_bearer_token || "");
           settingsForm.accounts_list_api_base = String(cfg.accounts_list_api_base || "");
+          settingsForm.remote_account_provider = normalizeRemoteAccountProvider(cfg.remote_account_provider || "sub2api");
+          settingsForm.cliproxy_api_base = String(cfg.cliproxy_api_base || "");
+          settingsForm.cliproxy_management_key = String(cfg.cliproxy_management_key || "");
           settingsForm.accounts_list_timezone = String(cfg.accounts_list_timezone || "Asia/Shanghai");
           settingsForm.codex_export_dir = String(cfg.codex_export_dir || "");
         }
@@ -1190,9 +1231,13 @@
             flclash_delay_retry: Number(settingsForm.flclash_delay_retry || 1),
             remote_test_concurrency: Number(settingsForm.remote_test_concurrency || 4),
             remote_test_ssl_retry: Number(settingsForm.remote_test_ssl_retry || 2),
+            remote_refresh_concurrency: Number(settingsForm.remote_refresh_concurrency || 4),
             accounts_sync_api_url: String(settingsForm.accounts_sync_api_url || "").trim(),
             accounts_sync_bearer_token: String(settingsForm.accounts_sync_bearer_token || "").trim(),
             accounts_list_api_base: String(settingsForm.accounts_list_api_base || "").trim(),
+            remote_account_provider: normalizeRemoteAccountProvider(settingsForm.remote_account_provider || "sub2api"),
+            cliproxy_api_base: String(settingsForm.cliproxy_api_base || "").trim(),
+            cliproxy_management_key: String(settingsForm.cliproxy_management_key || "").trim(),
             accounts_list_timezone: String(settingsForm.accounts_list_timezone || "Asia/Shanghai").trim(),
             codex_export_dir: String(settingsForm.codex_export_dir || "").trim()
           };
@@ -1590,6 +1635,9 @@
 
         async function loadRemoteCache() {
           const data = await apiRequest("/api/remote/cache");
+          if (data && data.provider) {
+            settingsForm.remote_account_provider = normalizeRemoteAccountProvider(data.provider);
+          }
           remoteRows.value = Array.isArray(data.items)
             ? data.items.map((x) => Object.assign({}, x, { is_dup: !!x.is_dup }))
             : [];
@@ -1612,6 +1660,7 @@
         async function fetchRemoteAll() {
           loading.remote = true;
           try {
+            await saveConfig(false);
             remoteRows.value = [];
             remoteSelection.value = [];
             remoteMeta.total = 0;
@@ -1650,7 +1699,13 @@
           const keys = remoteRows.value
             .filter((row) => {
               const s = String(row.test_status || "").trim();
-              return s === "失败" || s === "封禁" || s === "Token过期" || s === "429限流";
+              return (
+                s === "失败"
+                || s === "刷新失败"
+                || s === "封禁"
+                || s === "Token过期"
+                || s === "429限流"
+              );
             })
             .map((row) => row.key);
           if (!keys.length) {
@@ -1680,6 +1735,7 @@
           }
           loading.remote_test = true;
           try {
+            await saveConfig(false);
             const keySet = new Set(remoteSelection.value);
             const ids = remoteRows.value
               .filter((x) => keySet.has(x.key))
@@ -1708,6 +1764,62 @@
           }
         }
 
+        async function refreshSelectedRemoteAccounts() {
+          if (!remoteSelection.value.length) {
+            message.warning("请先勾选服务端账号");
+            return;
+          }
+          loading.remote_refresh = true;
+          try {
+            await saveConfig(false);
+            const keySet = new Set(remoteSelection.value);
+            const ids = remoteRows.value
+              .filter((x) => keySet.has(x.key))
+              .map((x) => String(x.id || "").trim())
+              .filter((x) => x);
+            if (!ids.length) {
+              message.warning("所选行缺少账号 ID");
+              return;
+            }
+            const data = await apiRequest("/api/remote/refresh-batch", {
+              method: "POST",
+              body: { ids }
+            });
+            await loadRemoteCache();
+            const ok = Number(data.ok || 0);
+            const fail = Number(data.fail || 0);
+            const apis = Array.isArray(data.api_summary)
+              ? data.api_summary.slice(0, 2)
+                .map((x) => `${String((x && x.api) || "-")}×${Number((x && x.count) || 0)}`)
+                .join("；")
+              : "";
+            if (fail === 0) {
+              message.success(
+                `批量刷新完成：成功 ${ok}`
+                + (apis ? `；接口：${apis}` : "")
+                + `；并发 ${Number(data.concurrency || 1)}`
+              );
+            } else {
+              const errs = Array.isArray(data.results)
+                ? data.results.filter((x) => !x.success).slice(0, 3)
+                : [];
+              const detail = errs
+                .map((x) => `${String((x && x.id) || "-")}: ${String((x && x.detail) || "未知错误")}`)
+                .join("；");
+              message.warning(
+                `批量刷新完成：成功 ${ok}，失败 ${fail}`
+                + (detail ? `；原因：${detail}` : "")
+                + (apis ? `；接口：${apis}` : "")
+                + `；并发 ${Number(data.concurrency || 1)}`
+              );
+            }
+          } catch (e) {
+            message.error(String(e.message || e));
+          } finally {
+            loading.remote_refresh = false;
+          }
+        }
+
         async function reviveSelectedRemoteAccounts() {
           if (!remoteSelection.value.length) {
             message.warning("请先勾选服务端账号");
@@ -1715,6 +1827,7 @@
           }
           loading.remote_revive = true;
           try {
+            await saveConfig(false);
             const keySet = new Set(remoteSelection.value);
             const rows = remoteRows.value.filter((x) => keySet.has(x.key));
             const ids = rows
@@ -1725,8 +1838,11 @@
               return;
             }
 
-            const tokenRows = rows.filter((x) => String(x.test_status || "").trim() === "Token过期");
-            if (!tokenRows.length) {
+            const isSub2Api = normalizeRemoteAccountProvider(settingsForm.remote_account_provider) === "sub2api";
+            const tokenRows = isSub2Api
+              ? rows.filter((x) => String(x.test_status || "").trim() === "Token过期")
+              : rows;
+            if (isSub2Api && !tokenRows.length) {
               message.warning("所选账号中没有“Token过期”状态");
               return;
             }
@@ -1796,6 +1912,7 @@
 
           loading.remote_delete = true;
           try {
+            await saveConfig(false);
             const data = await apiRequest("/api/remote/delete-batch", {
               method: "POST",
               body: { ids }
@@ -1834,12 +1951,17 @@
         }
 
         async function openRemoteGroupModal() {
+          if (normalizeRemoteAccountProvider(settingsForm.remote_account_provider) !== "sub2api") {
+            message.warning("CLIProxyAPI 暂不支持分组功能");
+            return;
+          }
           if (!remoteSelection.value.length) {
             message.warning("请先勾选服务端账号");
             return;
           }
           loading.remote_groups = true;
           try {
+            await saveConfig(false);
             const data = await apiRequest("/api/remote/groups", { method: "POST", body: {} });
             const items = Array.isArray(data.items) ? data.items : [];
             remoteGroupOptions.value = items.map((it) => ({
@@ -1860,6 +1982,10 @@
         }
 
         async function confirmRemoteGroupBulkUpdate() {
+          if (normalizeRemoteAccountProvider(settingsForm.remote_account_provider) !== "sub2api") {
+            message.warning("CLIProxyAPI 暂不支持分组功能");
+            return;
+          }
           if (!remoteSelection.value.length) {
             message.warning("请先勾选服务端账号");
             return;
@@ -1870,6 +1996,7 @@
           }
           loading.remote_group_update = true;
           try {
+            await saveConfig(false);
             const keySet = new Set(remoteSelection.value);
             const accountIds = remoteRows.value
               .filter((x) => keySet.has(x.key))
@@ -1977,22 +2104,25 @@
           message.success(`已按文件名勾选 ${keys.length} 个账号`);
         }
 
-        async function syncSelectedAccounts() {
+        async function syncSelectedAccounts(targetProvider = "") {
           if (!accountSelection.value.length) {
             message.warning("请先勾选账号");
             return;
           }
           loading.sync = true;
           try {
+            await saveConfig(false);
             const keySet = new Set(accountSelection.value);
             const emails = accountRows.value
               .filter((x) => keySet.has(x.key))
               .map((x) => x.email);
+            const provider = normalizeRemoteAccountProvider(targetProvider || settingsForm.remote_account_provider || "sub2api");
             const data = await apiRequest("/api/data/sync", {
               method: "POST",
-              body: { emails }
+              body: { emails, provider }
             });
-            message.success(`同步结束：成功 ${data.ok}，失败 ${data.fail}`);
+            const label = provider === "cliproxyapi" ? "cpa" : "sub2api";
+            message.success(`导入到${label}结束：成功 ${data.ok}，失败 ${data.fail}`);
           } catch (e) {
             message.error(String(e.message || e));
           } finally {
@@ -2279,6 +2409,28 @@
             refreshGraphAccountFiles(false);
           }
           refreshMailOverview(false);
+        }
+
+        async function updateRemoteAccountProvider(nextVal) {
+          const val = normalizeRemoteAccountProvider(nextVal || "sub2api");
+          settingsForm.remote_account_provider = val;
+          try {
+            await saveConfig(false);
+          } catch (_e) {
+            // 配置失败时保持现有视图，用户可重试。
+          }
+          remoteRows.value = [];
+          remoteSelection.value = [];
+          remoteMeta.total = 0;
+          remoteMeta.pages = 1;
+          remoteMeta.loaded = 0;
+          remoteMeta.ready = false;
+          remoteMeta.testing = false;
+          remoteMeta.test_total = 0;
+          remoteMeta.test_done = 0;
+          remoteMeta.test_ok = 0;
+          remoteMeta.test_fail = 0;
+          await loadRemoteCache();
         }
 
         async function loadMailDomainStats() {
@@ -2640,12 +2792,13 @@
               await Promise.all([refreshJson(false), refreshAccounts(false)]);
             }
             if (
-              activeTab.value === "data" &&
+              activeTab.value === "accounts" &&
               (
                 status.remote_busy ||
                 loading.remote ||
                 status.remote_test_busy ||
                 loading.remote_test ||
+                loading.remote_refresh ||
                 pollTick % 6 === 0
               )
             ) {
@@ -2692,6 +2845,13 @@
             await Promise.all([
               refreshSmsOverview(false, true),
               refreshSmsCountryOptions(false, true)
+            ]);
+            return;
+          }
+          if (tab === "accounts") {
+            await Promise.all([
+              refreshAccounts(false),
+              loadRemoteCache()
             ]);
             return;
           }
@@ -2750,6 +2910,7 @@
           accountSelection,
           accountBatchFiles,
           accountInfo,
+          accountManageTab,
           remoteRows,
           remoteSelection,
           remoteSearch,
@@ -2791,6 +2952,7 @@
           flclashProbeSummary,
           flclashPolicyOptions,
           graphFetchModeOptions,
+          remoteAccountProviderOptions,
           flclashProbeColumns,
           jsonColumns,
           accountColumns,
@@ -2822,6 +2984,7 @@
           openRemoteGroupModal,
           confirmRemoteGroupBulkUpdate,
           testSelectedRemoteAccounts,
+          refreshSelectedRemoteAccounts,
           reviveSelectedRemoteAccounts,
           deleteSelectedRemoteAccounts,
           jsonSelectAll,
@@ -2838,6 +3001,7 @@
           onGraphAccountFilePicked,
           deleteSelectedGraphAccountFile,
           updateMailProviderByTab,
+          updateRemoteAccountProvider,
           loadMailDomainStats,
           generateMailbox,
           mailboxSelectAll,

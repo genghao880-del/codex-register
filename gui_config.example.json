@@ -23,6 +23,7 @@
   "remote_test_concurrency": 4,
   "remote_test_ssl_retry": 2,
   "remote_revive_concurrency": 4,
+  "remote_refresh_concurrency": 4,
   "mail_delete_concurrency": 4,
 
   "worker_domain": "",
@@ -70,6 +71,9 @@
   "accounts_sync_api_url": "",
   "accounts_sync_bearer_token": "",
   "accounts_list_api_base": "",
+  "remote_account_provider": "sub2api",
+  "cliproxy_api_base": "",
+  "cliproxy_management_key": "",
   "accounts_list_page_size": 10,
   "accounts_list_fetch_workers": 4,
   "accounts_list_ssl_retry": 3,

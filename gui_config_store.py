@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
     "remote_test_concurrency": 4,
     "remote_test_ssl_retry": 2,
     "remote_revive_concurrency": 4,
+    "remote_refresh_concurrency": 4,
     "mail_delete_concurrency": 4,
     "worker_domain": "",
     "mail_domains": "",
@@ -75,6 +76,9 @@ DEFAULT_CONFIG = {
     "accounts_sync_api_url": "",
     "accounts_sync_bearer_token": "",
     "accounts_list_api_base": "",
+    "remote_account_provider": "sub2api",
+    "cliproxy_api_base": "",
+    "cliproxy_management_key": "",
     "accounts_list_page_size": 10,
     "accounts_list_fetch_workers": 4,
     "accounts_list_ssl_retry": 3,
@@ -133,6 +137,9 @@ def load_config() -> dict[str, Any]:
         cfg["mail_curl_api_base"] = env.get("MAIL_CURL_API_BASE", env.get("MC_API_BASE", ""))
         cfg["mail_curl_key"] = env.get("MAIL_CURL_KEY", env.get("MC_KEY", ""))
         cfg["mail_service_provider"] = mode
+        cfg["remote_account_provider"] = env.get("REMOTE_ACCOUNT_PROVIDER", cfg.get("remote_account_provider", "sub2api"))
+        cfg["cliproxy_api_base"] = env.get("CLIPROXY_API_BASE", env.get("CLIPROXY_MANAGEMENT_API", ""))
+        cfg["cliproxy_management_key"] = env.get("CLIPROXY_MANAGEMENT_KEY", env.get("MANAGEMENT_KEY", ""))
         cfg["gmail_imap_user"] = env.get("GMAIL_IMAP_USER", env.get("IMAP_USER", ""))
         cfg["gmail_imap_pass"] = env.get("GMAIL_IMAP_PASS", env.get("IMAP_PASS", ""))
         cfg["gmail_alias_emails"] = env.get("GMAIL_ALIAS_EMAILS", env.get("EMAIL_LIST", ""))
