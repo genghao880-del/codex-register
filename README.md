@@ -18,6 +18,7 @@ CodeX Register 是一个桌面化的 Web 控制台，用于统一管理注册流
 - [Graph 账号文件格式](#graph-账号文件格式)
 - [SMS 管理策略](#sms-管理策略)
 - [运行产物](#运行产物)
+- [自动发布（Tag Release）](#自动发布tag-release)
 - [本地 API 简表](#本地-api-简表)
 - [常见问题](#常见问题)
 
@@ -95,6 +96,7 @@ python gui.py --mode browser --no-auto-open
 - `SMS管理`：HeroSMS 开关、API Key、服务代码、国家价格下拉、余额刷新。
 - `服务设置`：并发、冷却、重试、网络与指纹相关配置。
 - `代理服务`：FlClash 配置与节点探测。
+- `关于`：查看版本号、作者、项目介绍，支持一键检测 GitHub 最新版本。
 - `运行日志`：完整运行日志输出。
 
 ## 配置文件与安全
@@ -268,6 +270,13 @@ bob@outlook.com----pass456----yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy----0.AXEA...
 - `accounts.txt`：账号与密码汇总（兼容保留，可清理）。
 - `local_accounts.db`：本地账号 SQLite 存储（唯一真源）。
 - `gui_config.json`：本地配置回写。
+
+## 自动发布（Tag Release）
+
+- 仓库内置 `.github/workflows/release.yml`，当推送 `v*` 标签时自动触发。
+- 会在 GitHub Actions 中构建 Windows/macOS/Linux 三个平台包，并上传到同一个 Release。
+- Release 描述会包含“更新信息”（标签注释/提交摘要）与校验文件 `SHA256SUMS.txt`。
+- 构建时会写入 `VERSION` 与 `REPOSITORY`，供「关于」页展示版本并检测更新。
 
 ## 本地 API 简表
 

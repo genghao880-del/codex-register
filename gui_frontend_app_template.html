@@ -861,6 +861,63 @@
                     </n-card>
                   </div>
 
+                  <div v-else-if="activeTab === 'about'" class="tab-page">
+                    <n-card class="glass-card" title="关于" size="small">
+                      <div class="about-head">
+                        <div class="about-name">{{ aboutInfo.name }}</div>
+                        <n-tag type="info" :bordered="false">v{{ aboutInfo.version }}</n-tag>
+                      </div>
+                      <div class="about-intro">{{ aboutInfo.intro }}</div>
+
+                      <div class="about-grid">
+                        <div class="about-item"><span class="about-label">作者</span><span class="about-value">{{ aboutInfo.author || '-' }}</span></div>
+                        <div class="about-item"><span class="about-label">仓库</span><a class="about-link" :href="aboutInfo.repo_url || '#'" target="_blank" rel="noreferrer">{{ aboutInfo.repo_slug || '未检测到' }}</a></div>
+                        <div class="about-item"><span class="about-label">平台</span><span class="about-value">{{ aboutInfo.platform || '-' }}</span></div>
+                        <div class="about-item"><span class="about-label">Python</span><span class="about-value">{{ aboutInfo.python || '-' }}</span></div>
+                      </div>
+
+                      <div class="toolbar" style="margin-top: 10px">
+                        <n-button class="toolbar-btn" :loading="loading.update_check" type="primary" @click="checkAppUpdate">检测更新</n-button>
+                        <n-button class="toolbar-btn" @click="refreshAboutInfo(true)">刷新信息</n-button>
+                      </div>
+
+                      <div v-if="updateInfo.checked" class="about-update-box">
+                        <div class="about-update-line">
+                          <span class="about-label">检测时间</span>
+                          <span class="about-value">{{ updateInfo.checked_at || '-' }}</span>
+                        </div>
+                        <div class="about-update-line">
+                          <span class="about-label">当前版本</span>
+                          <span class="about-value">{{ updateInfo.current_version || aboutInfo.version }}</span>
+                        </div>
+                        <div class="about-update-line">
+                          <span class="about-label">最新版本</span>
+                          <span class="about-value">{{ updateInfo.latest_tag || '-' }}</span>
+                        </div>
+                        <div class="about-update-line" v-if="updateInfo.published_at">
+                          <span class="about-label">发布时间</span>
+                          <span class="about-value">{{ updateInfo.published_at }}</span>
+                        </div>
+                        <div class="about-update-line" v-if="updateInfo.release_url">
+                          <span class="about-label">发布页</span>
+                          <a class="about-link" :href="updateInfo.release_url" target="_blank" rel="noreferrer">打开 Release</a>
+                        </div>
+                        <div class="about-update-line" v-if="updateInfo.error">
+                          <span class="about-label">结果</span>
+                          <span class="about-value" style="color:#f46b78">{{ updateInfo.error }}</span>
+                        </div>
+                        <div class="about-update-line" v-else>
+                          <span class="about-label">结果</span>
+                          <span class="about-value">{{ updateInfo.has_update ? '发现新版本' : '当前已是最新版本' }}</span>
+                        </div>
+                        <div v-if="updateInfo.release_notes" class="about-release-notes">
+                          <div class="about-label" style="margin-bottom: 4px">更新信息</div>
+                          <pre>{{ updateInfo.release_notes }}</pre>
+                        </div>
+                      </div>
+                    </n-card>
+                  </div>
+
                   </n-scrollbar>
 
                   <div v-else class="log-page-shell">

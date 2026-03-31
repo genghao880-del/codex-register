@@ -608,6 +608,86 @@
       color: var(--muted);
     }
 
+    .about-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+
+    .about-name {
+      font-size: 20px;
+      font-weight: 700;
+      color: #dcecff;
+    }
+
+    .about-intro {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #a8bed4;
+      margin-bottom: 10px;
+    }
+
+    .about-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(220px, 1fr));
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .about-item,
+    .about-update-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+    }
+
+    .about-label {
+      color: #8ea6bf;
+      min-width: 70px;
+      font-size: 12px;
+    }
+
+    .about-value {
+      color: #d7e5f4;
+      font-size: 13px;
+      word-break: break-all;
+    }
+
+    .about-link {
+      color: #69b9ff;
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    .about-link:hover {
+      text-decoration: underline;
+    }
+
+    .about-update-box {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid rgba(72, 105, 137, 0.38);
+      border-radius: 10px;
+      background: rgba(13, 22, 34, 0.58);
+    }
+
+    .about-release-notes pre {
+      margin: 0;
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(70, 98, 128, 0.32);
+      background: rgba(12, 19, 31, 0.68);
+      color: #c5d9ef;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .log-card {
       flex: 1;
       height: 0;
@@ -713,6 +793,10 @@
       .account-cta-group {
         margin-left: 0;
         width: 100%;
+      }
+
+      .about-grid {
+        grid-template-columns: 1fr;
       }
     }
 

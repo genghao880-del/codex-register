@@ -83,6 +83,14 @@ def _make_api_handler(service, index_html: str):
                     self._ok(service.status())
                     return
 
+                if path == "/api/app/about":
+                    self._ok(service.app_about_info())
+                    return
+
+                if path == "/api/app/check-update":
+                    self._ok(service.app_check_update())
+                    return
+
                 if path == "/api/logs":
                     qs = urllib.parse.parse_qs(parsed.query)
                     try:

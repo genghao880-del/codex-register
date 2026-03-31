@@ -7,6 +7,7 @@
           { label: "SMS管理", key: "sms" },
           { label: "服务设置", key: "settings" },
           { label: "代理服务", key: "proxy" },
+          { label: "关于", key: "about" },
           { label: "运行日志", key: "logs" }
         ];
 
@@ -173,6 +174,7 @@
           remote_refresh: false,
           remote_revive: false,
           remote_delete: false,
+          update_check: false,
           run_stats_clear: false,
           logs: false,
           mail_overview: false,
@@ -202,6 +204,30 @@
         const sub2apiExportForm = Vue.reactive({
           file_count: 1,
           accounts_per_file: 50
+        });
+
+        const aboutInfo = Vue.reactive({
+          name: "CodeX Register",
+          version: "0.0.0-dev",
+          author: "-",
+          intro: "",
+          repo_slug: "",
+          repo_url: "",
+          platform: "",
+          python: ""
+        });
+        const updateInfo = Vue.reactive({
+          checked: false,
+          checked_at: "",
+          has_update: false,
+          current_version: "",
+          latest_tag: "",
+          latest_name: "",
+          published_at: "",
+          release_url: "",
+          release_notes: "",
+          assets: [],
+          error: ""
         });
 
         const remoteRows = Vue.ref([]);
@@ -1605,6 +1631,58 @@
           remoteMeta.test_fail = Number(data.remote_test_fail || remoteMeta.test_fail || 0);
         }
 
+        function applyAboutInfo(data) {
+          aboutInfo.name = String((data && data.name) || "CodeX Register");
+          aboutInfo.version = String((data && data.version) || "0.0.0-dev");
+          aboutInfo.author = String((data && data.author) || "-");
+          aboutInfo.intro = String((data && data.intro) || "");
+          aboutInfo.repo_slug = String((data && data.repo_slug) || "");
+          aboutInfo.repo_url = String((data && data.repo_url) || "");
+          aboutInfo.platform = String((data && data.platform) || "");
+          aboutInfo.python = String((data && data.python) || "");
+        }
+
+        async function refreshAboutInfo(showSuccess = false) {
+          try {
+            const data = await apiRequest("/api/app/about");
+            applyAboutInfo(data);
+            if (showSuccess) message.success("关于信息已刷新");
+          } catch (e) {
+            if (showSuccess) message.error(String(e.message || e));
+          }
+        }
+
+        async function checkAppUpdate() {
+          loading.update_check = true;
+          try {
+            const data = await apiRequest("/api/app/check-update");
+            updateInfo.checked = true;
+            updateInfo.checked_at = String(data.checked_at || "");
+            updateInfo.has_update = !!data.has_update;
+            updateInfo.current_version = String(data.current_version || "");
+            updateInfo.latest_tag = String(data.latest_tag || "");
+            updateInfo.latest_name = String(data.latest_name || "");
+            updateInfo.published_at = String(data.published_at || "");
+            updateInfo.release_url = String(data.release_url || "");
+            updateInfo.release_notes = String(data.release_notes || "");
+            updateInfo.assets = Array.isArray(data.assets) ? data.assets : [];
+            updateInfo.error = "";
+            if (updateInfo.has_update) {
+              message.success(`发现新版本：${updateInfo.latest_tag || updateInfo.latest_name}`);
+            } else {
+              message.info("当前已是最新版本");
+            }
+          } catch (e) {
+            const err = String(e.message || e);
+            updateInfo.checked = true;
+            updateInfo.has_update = false;
+            updateInfo.error = err;
+            message.error(err);
+          } finally {
+            loading.update_check = false;
+          }
+        }
+
         async function pullLogs() {
           if (loading.logs) return;
           loading.logs = true;
@@ -2960,6 +3038,7 @@
             loadMailDomainStats(),
             refreshSmsOverview(false, true),
             refreshSmsCountryOptions(false, true),
+            refreshAboutInfo(false),
             loadStatus(),
             pullLogs()
           ]);
@@ -3037,6 +3116,10 @@
             ]);
             return;
           }
+          if (tab === "about") {
+            await refreshAboutInfo(false);
+            return;
+          }
           if (tab === "mail") {
             if (normalizeMailProvider(mailProviderTab.value) === "graph") {
               await refreshGraphAccountFiles(false);
@@ -3095,6 +3178,8 @@
           accountManageTab,
           showSub2ApiExportModal,
           sub2apiExportForm,
+          aboutInfo,
+          updateInfo,
           remoteRows,
           remoteSelection,
           remoteSearch,
@@ -3206,6 +3291,8 @@
           stopRun,
           clearLogs,
           clearRunStats,
+          refreshAboutInfo,
+          checkAppUpdate,
           onLogUserWheel,
           onLogUserScroll,
           manualPoll

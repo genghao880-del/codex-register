@@ -17,6 +17,7 @@ import json
 import os
 import random
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -97,6 +98,21 @@ from mail_services import (
     available_mail_providers,
     build_mail_service,
     normalize_mail_provider,
+)
+
+
+_APP_NAME = "CodeX Register"
+_APP_AUTHOR = "CodeX Register Contributors"
+_APP_VERSION_FILE = "VERSION"
+_APP_REPO_FILE = "REPOSITORY"
+_APP_REPO_ENV_KEYS = (
+    "CODEX_UPDATE_REPO",
+    "APP_UPDATE_REPO",
+    "GITHUB_REPOSITORY",
+)
+_APP_INTRO = (
+    "CodeX Register 是一套本地 Web 控制台，用于统一管理注册流程、邮箱服务、"
+    "SMS 接码、代理切换与账号导入导出。"
 )
 
 
@@ -510,6 +526,139 @@ class RegisterService:
         if val in {"cliproxyapi", "cliproxy", "cli_proxy_api", "cpa"}:
             return "cliproxyapi"
         return "sub2api"
+
+    @staticmethod
+    def _normalize_repo_slug(raw: Any) -> str:
+        text = str(raw or "").strip()
+        if not text:
+            return ""
+        if text.startswith("https://github.com/"):
+            text = text[len("https://github.com/") :]
+        if text.startswith("http://github.com/"):
+            text = text[len("http://github.com/") :]
+        if text.startswith("git@github.com:"):
+            text = text[len("git@github.com:") :]
+        text = text.strip().rstrip("/")
+        if text.endswith(".git"):
+            text = text[:-4]
+        parts = [p for p in text.split("/") if p]
+        if len(parts) < 2:
+            return ""
+        return f"{parts[0]}/{parts[1]}"
+
+    @classmethod
+    def _detect_repo_slug(cls) -> str:
+        for key in _APP_REPO_ENV_KEYS:
+            env_val = os.getenv(key, "")
+            slug = cls._normalize_repo_slug(env_val)
+            if slug:
+                return slug
+
+        repo_candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), _APP_REPO_FILE),
+            os.path.join(os.getcwd(), _APP_REPO_FILE),
+        ]
+        try:
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            repo_candidates.append(os.path.join(exe_dir, _APP_REPO_FILE))
+            if getattr(sys, "_MEIPASS", None):
+                repo_candidates.append(os.path.join(str(sys._MEIPASS), _APP_REPO_FILE))  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        seen_paths: set[str] = set()
+        for rp in repo_candidates:
+            p = os.path.abspath(str(rp or ""))
+            if not p or p in seen_paths:
+                continue
+            seen_paths.add(p)
+            try:
+                if not os.path.isfile(p):
+                    continue
+                with open(p, "r", encoding="utf-8") as f:
+                    raw = str(f.read()).strip()
+                slug = cls._normalize_repo_slug(raw)
+                if slug:
+                    return slug
+            except Exception:
+                continue
+
+        try:
+            raw = subprocess.check_output(
+                ["git", "config", "--get", "remote.origin.url"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except Exception:
+            raw = ""
+        return cls._normalize_repo_slug(raw)
+
+    @staticmethod
+    def _read_app_version() -> str:
+        env_ver = str(os.getenv("CODEX_REGISTER_VERSION", "") or "").strip()
+        if env_ver:
+            return env_ver.lstrip("vV")
+
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), _APP_VERSION_FILE),
+            os.path.join(os.getcwd(), _APP_VERSION_FILE),
+        ]
+        try:
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            candidates.append(os.path.join(exe_dir, _APP_VERSION_FILE))
+            if getattr(sys, "_MEIPASS", None):
+                candidates.append(os.path.join(str(sys._MEIPASS), _APP_VERSION_FILE))  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        seen_paths: set[str] = set()
+        for ver_path in candidates:
+            p = os.path.abspath(str(ver_path or ""))
+            if not p or p in seen_paths:
+                continue
+            seen_paths.add(p)
+            try:
+                if os.path.isfile(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        text = str(f.read()).strip()
+                    if text:
+                        return text.lstrip("vV")
+            except Exception:
+                continue
+
+        try:
+            raw = subprocess.check_output(
+                ["git", "describe", "--tags", "--always", "--dirty"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            if raw:
+                return raw.lstrip("vV")
+        except Exception:
+            pass
+        return "0.0.0-dev"
+
+    @staticmethod
+    def _version_tuple(raw: Any) -> tuple[int, ...]:
+        text = str(raw or "").strip().lstrip("vV")
+        if not text:
+            return (0,)
+        nums = [
+            int(x)
+            for x in re.findall(r"\d+", text)
+        ]
+        if not nums:
+            return (0,)
+        return tuple(nums)
+
+    @classmethod
+    def _is_newer_version(cls, latest: Any, current: Any) -> bool:
+        a = list(cls._version_tuple(latest))
+        b = list(cls._version_tuple(current))
+        n = max(len(a), len(b))
+        a.extend([0] * (n - len(a)))
+        b.extend([0] * (n - len(b)))
+        return tuple(a) > tuple(b)
 
     @staticmethod
     def _normalize_cliproxy_management_base(raw: Any) -> str:
@@ -945,6 +1094,93 @@ class RegisterService:
     def get_config(self) -> dict[str, Any]:
         with self._lock:
             return dict(self.cfg)
+
+    def app_about_info(self) -> dict[str, Any]:
+        slug = self._detect_repo_slug()
+        version = self._read_app_version()
+        repo_url = f"https://github.com/{slug}" if slug else ""
+        return {
+            "name": _APP_NAME,
+            "version": version,
+            "author": _APP_AUTHOR,
+            "intro": _APP_INTRO,
+            "repo_slug": slug,
+            "repo_url": repo_url,
+            "platform": sys.platform,
+            "python": sys.version.split()[0],
+        }
+
+    def app_check_update(self) -> dict[str, Any]:
+        about = self.app_about_info()
+        slug = str(about.get("repo_slug") or "").strip()
+        if not slug:
+            raise ValueError("未检测到 GitHub 仓库地址，无法检测更新")
+
+        api_url = f"https://api.github.com/repos/{slug}/releases/latest"
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "CodeX-Register-Update-Checker",
+        }
+
+        with self._lock:
+            verify_ssl = bool(self.cfg.get("openai_ssl_verify", True))
+            proxy_arg = str(self.cfg.get("proxy") or "").strip() or None
+
+        code, text = _http_get(
+            api_url,
+            headers,
+            verify_ssl=verify_ssl,
+            timeout=30,
+            proxy=proxy_arg,
+        )
+        if code == -1:
+            raise RuntimeError(_hint_connect_error(str(text or "请求失败")))
+        if not (200 <= code < 300):
+            snippet = str(text or "").strip().replace("\n", " ")[:260]
+            raise RuntimeError(f"检测更新失败 HTTP {code}: {snippet}")
+
+        try:
+            payload = json.loads(text) if str(text or "").strip() else {}
+        except Exception as e:
+            raise RuntimeError(f"更新接口返回非 JSON: {e}") from e
+        if not isinstance(payload, dict):
+            raise RuntimeError("更新接口返回结构异常")
+
+        latest_tag = str(payload.get("tag_name") or "").strip()
+        latest_name = str(payload.get("name") or latest_tag or "").strip()
+        published_at = str(payload.get("published_at") or "").strip()
+        html_url = str(payload.get("html_url") or "").strip()
+        body = str(payload.get("body") or "").strip()
+        if len(body) > 6000:
+            body = body[:6000] + "\n..."
+
+        assets: list[dict[str, Any]] = []
+        for it in payload.get("assets") or []:
+            if not isinstance(it, dict):
+                continue
+            assets.append(
+                {
+                    "name": str(it.get("name") or "").strip(),
+                    "size": int(it.get("size") or 0),
+                    "url": str(it.get("browser_download_url") or "").strip(),
+                }
+            )
+
+        current_version = str(about.get("version") or "0.0.0-dev")
+        has_update = bool(latest_tag) and self._is_newer_version(latest_tag, current_version)
+
+        return {
+            "repo_slug": slug,
+            "current_version": current_version,
+            "latest_tag": latest_tag,
+            "latest_name": latest_name,
+            "published_at": published_at,
+            "release_url": html_url,
+            "release_notes": body,
+            "assets": assets,
+            "has_update": has_update,
+            "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
     def update_config(self, data: dict[str, Any], emit_log: bool = True) -> dict[str, Any]:
         with self._lock:
