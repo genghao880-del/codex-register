@@ -100,7 +100,7 @@
                         <n-alert type="info" title="运行说明" :show-icon="false">
                           启动后会在后台按配置调用 r_with_pwd.run，日志实时出现在底部。<br />
                           会按“文件数量 × 每文件注册数”分批创建 accounts_*.json；失败会自动补位，尽量补齐每个文件目标。<br />
-                          建议先保存配置，再开始任务；停止后可在「数据」页继续管理导出与同步。
+                          建议先保存配置，再开始任务；停止后可在「账号管理」页继续管理导出与同步。
                         </n-alert>
                         <n-alert style="margin-top: 10px" type="success" title="提速建议" :show-icon="false">
                           并发仅作用于当前文件，建议 2~3；冷却 1~3 秒；开启加速模式可缩短 OTP 轮询与网络退避等待。<br />
@@ -112,31 +112,6 @@
                       </div>
                     </div>
                   </n-card>
-                  </div>
-
-                  <div v-else-if="activeTab === 'data'" class="tab-page">
-                    <n-card class="glass-card" title="导出 JSON" size="small">
-                      <template #header-extra>
-                        <span class="meta">{{ jsonInfo.file_count }} 个文件 · {{ jsonInfo.account_total }} 账号</span>
-                      </template>
-                      <div class="toolbar">
-                        <n-button class="toolbar-btn" @click="refreshJson(true)">刷新</n-button>
-                        <n-button class="toolbar-btn" @click="jsonSelectAll">全选</n-button>
-                        <n-button class="toolbar-btn" @click="jsonSelectNone">全不选</n-button>
-                        <n-button class="toolbar-btn" type="error" ghost @click="deleteSelectedJson">删除已勾选</n-button>
-                      </div>
-                      <n-data-table
-                        class="json-table"
-                        size="small"
-                        table-layout="fixed"
-                        :single-line="false"
-                        :columns="jsonColumns"
-                        :data="jsonRows"
-                        :row-key="rowKeyPath"
-                        :row-class-name="jsonRowClassName"
-                        v-model:checked-row-keys="jsonSelection"
-                      />
-                    </n-card>
                   </div>
 
                   <div v-else-if="activeTab === 'accounts'" class="tab-page">

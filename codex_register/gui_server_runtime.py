@@ -287,6 +287,13 @@ def _make_api_handler(service, index_html: str):
                     self._ok(service.remote_bulk_update_groups(account_ids, group_ids))
                     return
 
+                if path == "/api/remote/access-token":
+                    payload = self._read_json_body()
+                    aid = payload.get("id")
+                    file_name = payload.get("file_name")
+                    self._ok(service.remote_access_token(aid, file_name))
+                    return
+
                 if path == "/api/flclash/probe":
                     payload = self._read_json_body()
                     self._ok(

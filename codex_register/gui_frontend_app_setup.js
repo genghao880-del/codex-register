@@ -1,7 +1,6 @@
         const activeTab = Vue.ref("dash");
         const menuOptions = [
           { label: "工作台", key: "dash" },
-          { label: "数据", key: "data" },
           { label: "账号管理", key: "accounts" },
           { label: "邮箱设置", key: "mail" },
           { label: "SMS管理", key: "sms" },
@@ -975,7 +974,7 @@
           { type: "selection", multiple: true },
           { title: "#", key: "index", width: 56 },
           { title: "邮箱", key: "email", minWidth: 220, ellipsis: { tooltip: true } },
-          { title: "密码", key: "password", minWidth: 180, ellipsis: { tooltip: true } },
+          { title: "密码", key: "password", width: 150, ellipsis: { tooltip: true } },
           {
             title: "测活",
             key: "test_status",
@@ -1004,7 +1003,27 @@
               );
             }
           },
-          { title: "备注", key: "note", minWidth: 300, ellipsis: { tooltip: true } }
+          { title: "备注", key: "note", minWidth: 300, ellipsis: { tooltip: true } },
+          {
+            title: "功能",
+            key: "actions",
+            width: 88,
+            render(row) {
+              const token = String((row && row.access_token) || "").trim();
+              return Vue.h(
+                naive.NButton,
+                {
+                  size: "small",
+                  type: "primary",
+                  tertiary: true,
+                  disabled: !token,
+                  title: "复制 access_token",
+                  onClick: () => accountCopyToken(row)
+                },
+                { default: () => "复制AT" }
+              );
+            }
+          }
         ];
 
         function accountExportableRows() {
@@ -1177,6 +1196,31 @@
                 { default: () => "未测" }
               );
             }
+          },
+          {
+            title: "功能",
+            key: "actions",
+            width: 88,
+            render(row) {
+              const token = String((row && row.access_token) || "").trim();
+              const provider = normalizeRemoteAccountProvider(settingsForm.remote_account_provider);
+              const canDownload = (
+                provider === "cliproxyapi"
+                && !!String((row && row.file_name) || "").trim()
+              );
+              return Vue.h(
+                naive.NButton,
+                {
+                  size: "small",
+                  type: "primary",
+                  tertiary: true,
+                  disabled: !(token || canDownload),
+                  title: "复制 access_token",
+                  onClick: () => remoteCopyToken(row)
+                },
+                { default: () => "复制AT" }
+              );
+            }
           }
         ];
 
@@ -1222,6 +1266,70 @@
             throw new Error(payload.error || `HTTP ${resp.status}`);
           }
           return payload.data;
+        }
+
+        async function copyText(text) {
+          const raw = String(text || "");
+          if (!raw) {
+            throw new Error("空内容无法复制");
+          }
+          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+            await navigator.clipboard.writeText(raw);
+            return;
+          }
+          const el = document.createElement("textarea");
+          el.value = raw;
+          el.setAttribute("readonly", "readonly");
+          el.style.position = "fixed";
+          el.style.left = "-9999px";
+          document.body.appendChild(el);
+          el.focus();
+          el.select();
+          try {
+            const ok = document.execCommand("copy");
+            if (!ok) throw new Error("浏览器不支持复制");
+          } finally {
+            document.body.removeChild(el);
+          }
+        }
+
+        async function accountCopyToken(row) {
+          const token = String((row && row.access_token) || "").trim();
+          if (!token) {
+            message.warning("该本地账号暂无可复制 access_token");
+            return;
+          }
+          try {
+            await copyText(token);
+            message.success("已复制本地账号 access_token");
+          } catch (e) {
+            message.error(String(e.message || e));
+          }
+        }
+
+        async function remoteCopyToken(row) {
+          try {
+            let token = String((row && row.access_token) || "").trim();
+            if (!token) {
+              const data = await apiRequest("/api/remote/access-token", {
+                method: "POST",
+                body: {
+                  id: String((row && row.id) || "").trim(),
+                  file_name: String((row && row.file_name) || "").trim()
+                }
+              });
+              token = String((data && data.access_token) || "").trim();
+              if (!token) {
+                throw new Error("接口未返回 access_token");
+              }
+              if (row) row.access_token = token;
+            }
+
+            await copyText(token);
+            message.success("已复制云端账号 access_token");
+          } catch (e) {
+            message.error(String(e.message || e));
+          }
         }
 
         function assignConfig(cfg) {
@@ -2309,7 +2417,7 @@
               body: { emails }
             });
             accountSelection.value = [];
-            await Promise.all([refreshAccounts(false), refreshJson(false)]);
+            await refreshAccounts(false);
             message.success(
               `删除完成：账号 ${Number(data.deleted || 0)} 条，`
               + `accounts.txt ${Number(data.removed_txt_lines || 0)} 行，`
@@ -3031,7 +3139,6 @@
         async function initialLoad() {
           await loadConfig();
           await Promise.all([
-            refreshJson(false),
             refreshAccounts(false),
             loadRemoteCache(),
             loadMailProviders(),
@@ -3050,7 +3157,7 @@
             await pullLogs();
             pollTick += 1;
             if (status.running && pollTick % 4 === 0) {
-              await Promise.all([refreshJson(false), refreshAccounts(false)]);
+              await refreshAccounts(false);
             }
             if (
               activeTab.value === "accounts" &&

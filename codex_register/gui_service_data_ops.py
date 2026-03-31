@@ -615,6 +615,66 @@ def _open_directory(path: str) -> bool:
         return False
 
 
+def _extract_access_token_from_box(box: Any) -> str:
+    if not isinstance(box, dict):
+        return ""
+
+    for key in ("access_token", "accessToken"):
+        val = str(box.get(key) or "").strip()
+        if val:
+            return val
+
+    raw_token = box.get("token")
+    if isinstance(raw_token, dict):
+        for key in ("access_token", "accessToken"):
+            val = str(raw_token.get(key) or "").strip()
+            if val:
+                return val
+
+    token_text = str(raw_token or "").strip()
+    if token_text.startswith("{") and token_text.endswith("}"):
+        try:
+            obj = json.loads(token_text)
+        except Exception:
+            obj = None
+        if isinstance(obj, dict):
+            for key in ("access_token", "accessToken"):
+                val = str(obj.get(key) or "").strip()
+                if val:
+                    return val
+
+    return ""
+
+
+def _extract_access_token_from_account_obj(acc: dict[str, Any]) -> str:
+    containers: list[dict[str, Any]] = []
+    if isinstance(acc, dict):
+        containers.append(acc)
+        for key in ("credentials", "extra", "auth", "tokens"):
+            sub = acc.get(key)
+            if isinstance(sub, dict):
+                containers.append(sub)
+
+    for box in containers:
+        token = _extract_access_token_from_box(box)
+        if token:
+            return token
+    return ""
+
+
+def _extract_access_token_from_account_json(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return _extract_access_token_from_account_obj(payload)
+
+
 def _account_to_codex_record(acc: dict[str, Any]) -> dict[str, str]:
     creds = acc.get("credentials") if isinstance(acc.get("credentials"), dict) else {}
     extra = acc.get("extra") if isinstance(acc.get("extra"), dict) else {}
@@ -1069,6 +1129,9 @@ def list_accounts(service) -> dict[str, Any]:
             else:
                 status = "pending"
         test_state = local_test_state.get(ep) or {}
+        access_token = _extract_access_token_from_account_json(
+            (row or {}).get("account_json")
+        )
         items.append(
             {
                 "key": f"{int((row or {}).get('id') or i)}:{email}",
@@ -1085,6 +1148,7 @@ def list_accounts(service) -> dict[str, Any]:
                 "test_status": str(test_state.get("status") or "未测"),
                 "test_result": str(test_state.get("result") or "-"),
                 "test_at": str(test_state.get("at") or "-"),
+                "access_token": access_token,
                 "source": source_text,
                 "source_files": src_files,
                 "source_primary": primary_source,

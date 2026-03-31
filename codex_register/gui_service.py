@@ -528,6 +528,44 @@ class RegisterService:
         return "sub2api"
 
     @staticmethod
+    def _extract_remote_item_access_token(item: Any) -> str:
+        if not isinstance(item, dict):
+            return ""
+
+        containers: list[dict[str, Any]] = [item]
+        for k in ("credentials", "auth", "tokens", "extra"):
+            sub = item.get(k)
+            if isinstance(sub, dict):
+                containers.append(sub)
+
+        for box in containers:
+            for key in ("access_token", "accessToken"):
+                val = str(box.get(key) or "").strip()
+                if val:
+                    return val
+
+            token_obj = box.get("token")
+            if isinstance(token_obj, dict):
+                for key in ("access_token", "accessToken"):
+                    val = str(token_obj.get(key) or "").strip()
+                    if val:
+                        return val
+
+            token_text = str(token_obj or "").strip()
+            if token_text.startswith("{") and token_text.endswith("}"):
+                try:
+                    payload = json.loads(token_text)
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict):
+                    for key in ("access_token", "accessToken"):
+                        val = str(payload.get(key) or "").strip()
+                        if val:
+                            return val
+
+        return ""
+
+    @staticmethod
     def _normalize_repo_slug(raw: Any) -> str:
         text = str(raw or "").strip()
         if not text:
@@ -3552,6 +3590,8 @@ class RegisterService:
                 if search_kw not in haystack:
                     continue
 
+            access_token = self._extract_remote_item_access_token(it)
+
             rows.append(
                 {
                     "key": f"{aid}-{idx}",
@@ -3579,6 +3619,7 @@ class RegisterService:
                     "disabled": bool(it.get("disabled")),
                     "unavailable": bool(it.get("unavailable")),
                     "status_message": str(it.get("status_message") or ""),
+                    "access_token": access_token,
                     "provider_source": "cliproxyapi",
                 }
             )
@@ -3746,6 +3787,7 @@ class RegisterService:
                     typ = str(it.get("type") or "")
                     st = str(it.get("status") or "")
                     gl = self._remote_item_groups_label(it)
+                    access_token = self._extract_remote_item_access_token(it)
 
                     u5, u7 = "--", "--"
                     if aid.isdigit():
@@ -3790,6 +3832,7 @@ class RegisterService:
                             "test_at": str(
                                 (test_state_snapshot.get(aid) or {}).get("at") or "-"
                             ),
+                            "access_token": access_token,
                             "is_dup": False,
                         }
                     )
@@ -3890,6 +3933,127 @@ class RegisterService:
                 "test_ok": int(self._remote_test_stats.get("ok", 0)),
                 "test_fail": int(self._remote_test_stats.get("fail", 0)),
             }
+
+    def remote_access_token(self, account_id: Any = "", file_name: Any = "") -> dict[str, Any]:
+        """按账号获取 access_token（CLIProxyAPI 支持 download 接口兜底）。"""
+        aid = str(account_id or "").strip()
+        fname = str(file_name or "").strip()
+
+        provider = self._normalize_remote_account_provider(
+            self.cfg.get("remote_account_provider") or "sub2api"
+        )
+
+        with self._lock:
+            rows = [dict(x) for x in self._remote_rows]
+
+        target: dict[str, Any] | None = None
+        if aid:
+            for row in rows:
+                if str(row.get("id") or "").strip() == aid:
+                    target = row
+                    break
+        if target is None and fname:
+            for row in rows:
+                if str(row.get("file_name") or "").strip() == fname:
+                    target = row
+                    break
+
+        if target is None and rows:
+            # 未命中时保留空 target，不做猜测。
+            target = None
+
+        cached = str(((target or {}).get("access_token")) or "").strip()
+        if cached:
+            return {
+                "id": str((target or {}).get("id") or aid),
+                "file_name": str((target or {}).get("file_name") or fname),
+                "access_token": cached,
+                "source": "cache",
+            }
+
+        if provider != "cliproxyapi":
+            raise ValueError("当前账号未提供可复制的 access_token")
+
+        if not fname:
+            fname = str((target or {}).get("file_name") or "").strip()
+        if not fname:
+            maybe_id = str((target or {}).get("id") or aid).strip()
+            if maybe_id.endswith(".json"):
+                fname = maybe_id
+        if not fname:
+            raise ValueError("缺少账号文件名，无法通过 CLIProxyAPI 下载 token")
+
+        base, auth, verify_ssl, proxy_arg = self._cliproxy_management_context()
+        headers = {
+            "Accept": "application/json",
+            "Authorization": auth,
+        }
+        name_candidates = [fname]
+        try:
+            alt = urllib.parse.unquote(fname)
+            if alt and alt not in name_candidates:
+                name_candidates.append(alt)
+        except Exception:
+            pass
+
+        code = -1
+        text = ""
+        used_name = fname
+        for name_try in name_candidates:
+            qs = urllib.parse.urlencode({"name": name_try})
+            url = f"{base.rstrip('/')}/auth-files/download?{qs}"
+            c, t = _http_get(
+                url,
+                headers,
+                verify_ssl=verify_ssl,
+                timeout=90,
+                proxy=proxy_arg,
+            )
+            code, text = c, t
+            if 200 <= code < 300:
+                used_name = name_try
+                break
+
+        if not (200 <= code < 300):
+            snippet = str(text or "").replace("\n", " ")[:260]
+            raise RuntimeError(f"下载账号文件失败 HTTP {code}: {snippet}")
+
+        payload: Any = {}
+        raw = str(text or "").strip()
+        if raw:
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = {}
+
+        token = self._extract_remote_item_access_token(payload)
+        if not token and isinstance(payload, dict):
+            content = payload.get("content")
+            if isinstance(content, str):
+                c = content.strip()
+                if c:
+                    try:
+                        content_obj = json.loads(c)
+                    except Exception:
+                        content_obj = {}
+                    token = self._extract_remote_item_access_token(content_obj)
+
+        if not token:
+            raise RuntimeError("下载账号文件成功，但未解析到 access_token")
+
+        with self._lock:
+            for row in self._remote_rows:
+                rid = str(row.get("id") or "").strip()
+                rfile = str(row.get("file_name") or "").strip()
+                if (aid and rid == aid) or (used_name and rfile == used_name) or (fname and rfile == fname):
+                    row["access_token"] = token
+
+        return {
+            "id": str((target or {}).get("id") or aid),
+            "file_name": used_name,
+            "access_token": token,
+            "source": "download",
+        }
 
     @staticmethod
     def _consume_test_event_stream(resp) -> tuple[bool, str, str]:
