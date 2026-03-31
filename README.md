@@ -10,6 +10,7 @@ CodeX Register 是一个桌面化的 Web 控制台，用于统一管理注册流
 
 - [功能概览](#功能概览)
 - [运行架构](#运行架构)
+- [目录速览](#目录速览)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
 - [界面说明](#界面说明)
@@ -43,6 +44,26 @@ gui.py
 ```
 
 目录整理后，核心 Python/前端资源统一放在 `codex_register/`，根目录只保留入口、配置、脚本和文档。
+
+## 目录速览
+
+```text
+.
+├─ gui.py                        # 程序入口（窗口/浏览器模式）
+├─ codex_register/               # 核心代码包
+│  ├─ gui_service.py             # 核心编排与状态管理
+│  ├─ gui_server_runtime.py      # 本地 HTTP API
+│  ├─ gui_frontend.py            # 前端页面组装
+│  ├─ r_with_pwd.py              # 注册与 OAuth 主流程
+│  ├─ mail_services.py           # 邮箱服务工厂
+│  └─ mail_providers/            # 各邮箱 Provider 模块
+├─ scripts/                      # 打包/Release 脚本
+├─ .github/workflows/            # CI/CD（Tag 自动发布）
+├─ gui_config.example.json       # 配置示例
+├─ README.md
+├─ VERSION
+└─ REPOSITORY
+```
 
 ## 环境要求
 
