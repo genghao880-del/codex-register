@@ -102,9 +102,13 @@ from .mail_services import (
 
 
 _APP_NAME = "CodeX Register"
-_APP_AUTHOR = "CodeX Register Contributors"
+_APP_AUTHOR = "Msg-Lbo"
+_APP_AUTHOR_URL = "https://github.com/Msg-Lbo"
+_APP_LICENSE_NAME = "CodeX Register 使用协议（非开源许可）"
+_APP_LICENSE_FILE = "LICENSE"
 _APP_VERSION_FILE = "VERSION"
 _APP_REPO_FILE = "REPOSITORY"
+_APP_DEFAULT_REPO_SLUG = "Msg-Lbo/codeX-register"
 _APP_REPO_ENV_KEYS = (
     "CODEX_UPDATE_REPO",
     "APP_UPDATE_REPO",
@@ -1135,13 +1139,22 @@ class RegisterService:
 
     def app_about_info(self) -> dict[str, Any]:
         slug = self._detect_repo_slug()
+        if not slug:
+            slug = _APP_DEFAULT_REPO_SLUG
         version = self._read_app_version()
         repo_url = f"https://github.com/{slug}" if slug else ""
+        license_path = os.path.join(os.getcwd(), _APP_LICENSE_FILE)
+        license_url = f"{repo_url}/blob/main/{_APP_LICENSE_FILE}" if repo_url else ""
         return {
             "name": _APP_NAME,
             "version": version,
             "author": _APP_AUTHOR,
+            "author_url": _APP_AUTHOR_URL,
             "intro": _APP_INTRO,
+            "license_name": _APP_LICENSE_NAME,
+            "license_file": _APP_LICENSE_FILE,
+            "license_exists": os.path.isfile(license_path),
+            "license_url": license_url,
             "repo_slug": slug,
             "repo_url": repo_url,
             "platform": sys.platform,

@@ -209,7 +209,12 @@
           name: "CodeX Register",
           version: "0.0.0-dev",
           author: "-",
+          author_url: "",
           intro: "",
+          license_name: "-",
+          license_file: "LICENSE",
+          license_exists: false,
+          license_url: "",
           repo_slug: "",
           repo_url: "",
           platform: "",
@@ -1743,7 +1748,12 @@
           aboutInfo.name = String((data && data.name) || "CodeX Register");
           aboutInfo.version = String((data && data.version) || "0.0.0-dev");
           aboutInfo.author = String((data && data.author) || "-");
+          aboutInfo.author_url = String((data && data.author_url) || "");
           aboutInfo.intro = String((data && data.intro) || "");
+          aboutInfo.license_name = String((data && data.license_name) || "-");
+          aboutInfo.license_file = String((data && data.license_file) || "LICENSE");
+          aboutInfo.license_exists = !!(data && data.license_exists);
+          aboutInfo.license_url = String((data && data.license_url) || "");
           aboutInfo.repo_slug = String((data && data.repo_slug) || "");
           aboutInfo.repo_url = String((data && data.repo_url) || "");
           aboutInfo.platform = String((data && data.platform) || "");

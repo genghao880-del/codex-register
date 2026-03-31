@@ -845,8 +845,10 @@
                       <div class="about-intro">{{ aboutInfo.intro }}</div>
 
                       <div class="about-grid">
-                        <div class="about-item"><span class="about-label">作者</span><span class="about-value">{{ aboutInfo.author || '-' }}</span></div>
+                        <div class="about-item"><span class="about-label">作者</span><a class="about-link" :href="aboutInfo.author_url || '#'" target="_blank" rel="noreferrer">{{ aboutInfo.author || '-' }}</a></div>
+                        <div class="about-item"><span class="about-label">协议</span><a class="about-link" :href="aboutInfo.license_url || '#'" target="_blank" rel="noreferrer">{{ aboutInfo.license_name || '-' }}</a></div>
                         <div class="about-item"><span class="about-label">仓库</span><a class="about-link" :href="aboutInfo.repo_url || '#'" target="_blank" rel="noreferrer">{{ aboutInfo.repo_slug || '未检测到' }}</a></div>
+                        <div class="about-item"><span class="about-label">协议文件</span><a class="about-link" :href="aboutInfo.license_url || '#'" target="_blank" rel="noreferrer">{{ aboutInfo.license_exists ? aboutInfo.license_file : '未检测到' }}</a></div>
                         <div class="about-item"><span class="about-label">平台</span><span class="about-value">{{ aboutInfo.platform || '-' }}</span></div>
                         <div class="about-item"><span class="about-label">Python</span><span class="about-value">{{ aboutInfo.python || '-' }}</span></div>
                       </div>
