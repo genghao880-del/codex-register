@@ -40,12 +40,12 @@ from curl_cffi import CurlMime
 EMAIL_API_MODE = "imap"
 
 # [公共配置: cloudflare_temp_email / imap 共享]
-MAIL_DOMAINS = "domain1.com,domain2.xyz,domain3.net" # 你的域名 (支持逗号分隔多域名随机轮换) 如果只有一个域名就只填一个域名
+MAIL_DOMAINS = "domain1.com,domain2.xyz,domain3.net" # 你的域名 (支持逗号分隔多域名随机轮换)
 GPTMAIL_BASE = "https://your-domain.com"     # 你的临时邮箱 后端API 基础地址 结尾不要/
 
 # [模式 "imap" 专属配置] (CF Catch-all 转发接收端)
 IMAP_SERVER = "imap.gmail.com"
-IMAP_PORT = 993                          # IMAP 端口
+IMAP_PORT = 993
 IMAP_USER = "xgp1988989898@gmail.com"
 IMAP_PASS = "dmlp wdeu unbm jraa"
 
@@ -54,31 +54,27 @@ FREEMAIL_API_URL = "https://m.gqq.be"
 FREEMAIL_API_TOKEN = "uofTdAbL2aQcT1Vg0RYrFPk3pRr3V2u"
 
 # [模式 "cloudflare_temp_email" 专属配置]
-ADMIN_AUTH = "" # 你的临时邮箱管理员密码
+ADMIN_AUTH = ""
 
-DEFAULT_PROXY = "" #openai注册时代理地址，例子：http://127.0.0.1:7897。如果是国外服务器此项可以不填
-# [邮箱代理专项配置]
-USE_PROXY_FOR_EMAIL = False  # 【开关】True 表示获取邮箱也用代理，False 表示直连（推荐先试 False）如果是国外服务器此项可以保持False
-TOKEN_OUTPUT_DIR = os.getenv("TOKEN_OUTPUT_DIR", "").strip() #目录 默认存放跟脚本一个目录
+DEFAULT_PROXY = ""
+USE_PROXY_FOR_EMAIL = False
+TOKEN_OUTPUT_DIR = os.getenv("TOKEN_OUTPUT_DIR", "").strip()
 # ================= 这里不要动 =================
 AUTH_URL = "https://auth.openai.com/oauth/authorize"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-DEFAULT_REDIRECT_URI = f"http://localhost:1455/auth/callback"
+DEFAULT_REDIRECT_URI = "http://localhost:1455/auth/callback"
 DEFAULT_SCOPE = "openid email profile offline_access"
 # ================= 这里不要动 =================
 
 # ================= CPA 模式专属配置 =================
-ENABLE_CPA_MODE = False  # 【开关】True 开启巡检补货上传，False 则只进行常规无限注册
-CPA_API_URL = "https://ai.198502.xyz"   # CPA的api地址
-CPA_API_TOKEN = "8991-4bdb-8489-36fa90a8813c"  # CPA登陆密码
-MIN_ACCOUNTS_THRESHOLD = 3000  # 仓库存量低于此值时触发补货
-BATCH_REG_COUNT = 100         # 每次触发补货注册的数量
-
-# 周限额剔除阈值设置 (0-100)
-# 设为 80 代表额度剩余低于 80% 就当作死号剔除，设为 0 代表完全耗尽才剔除。
-MIN_REMAINING_WEEKLY_PERCENT = 0 
-CHECK_INTERVAL_MINUTES = 60  #CPA 仓库巡检的间隔时间，默认每60分钟巡检一次
+ENABLE_CPA_MODE = False
+CPA_API_URL = "https://ai.198502.xyz"
+CPA_API_TOKEN = "8991-4bdb-8489-36fa90a8813c"
+MIN_ACCOUNTS_THRESHOLD = 3000
+BATCH_REG_COUNT = 100
+MIN_REMAINING_WEEKLY_PERCENT = 0
+CHECK_INTERVAL_MINUTES = 60
 # ================= CPA 模式专属配置 =================
 
 DEFAULT_CLIPROXY_UA = "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal"
@@ -91,6 +87,31 @@ KNOWN_CLIPROXY_ERROR_LABELS = {
 }
 OTP_CODE_PATTERN = r"(?<!\d)(\d{6})(?!\d)"
 # ================= 配置区结束 =================
+
+# ================= 浏览器指纹池 =================
+_BROWSER_FINGERPRINTS = [
+    {"impersonate": "chrome131", "ua_hint": "Chrome/131"},
+    {"impersonate": "chrome124", "ua_hint": "Chrome/124"},
+    {"impersonate": "chrome110", "ua_hint": "Chrome/110"},
+    {"impersonate": "safari17_0", "ua_hint": "Safari/17"},
+    {"impersonate": "edge101",   "ua_hint": "Edg/101"},
+]
+
+def _choose_browser_fingerprint() -> dict:
+    """随机或固定返回一个浏览器指纹配置。
+    可通过环境变量 REGISTER_RANDOM_FINGERPRINT=0 固定使用 chrome131。
+    """
+    flag = os.getenv("REGISTER_RANDOM_FINGERPRINT", "1").strip().lower()
+    if flag in {"0", "false", "no", "off"}:
+        return _BROWSER_FINGERPRINTS[0]
+    return random.choice(_BROWSER_FINGERPRINTS)
+
+def _apply_session_fingerprint(session: Any, fp: dict) -> None:
+    """将指纹应用到已有 session（仅记录，curl_cffi 在请求时传 impersonate）。"""
+    # curl_cffi Session 不支持全局 impersonate 属性直接赋值，
+    # 此处仅作标记，run() 中 get/post 调用时显式传入 impersonate。
+    session._fp = fp
+# ================= 浏览器指纹池 END =================
 
 def _load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path): return
@@ -111,7 +132,6 @@ def _load_dotenv(path: str = ".env") -> None:
 _load_dotenv()
 
 def ts() -> str:
-    """获取当前时间戳字符串"""
     return datetime.now().strftime("%H:%M:%S")
 
 def _ssl_verify() -> bool:
@@ -122,17 +142,120 @@ def _skip_net_check() -> bool:
     flag = os.getenv("SKIP_NET_CHECK", "0").strip().lower()
     return flag in {"1", "true", "yes", "on"}
 
+# ================= TLS 重试辅助 =================
+def _session_get_with_tls_retry(
+    session: Any,
+    url: str,
+    *,
+    proxies: Any = None,
+    timeout: int = 15,
+    retries: int = 3,
+    impersonate: str = "chrome131",
+) -> Any:
+    """带 TLS 抖动重试的 GET，遇到连接/TLS 错误时自动切换指纹重试。"""
+    fp_pool = [f["impersonate"] for f in _BROWSER_FINGERPRINTS]
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries):
+        imp = impersonate if attempt == 0 else random.choice(fp_pool)
+        try:
+            return session.get(
+                url,
+                proxies=proxies,
+                verify=_ssl_verify(),
+                timeout=timeout,
+                impersonate=imp,
+                allow_redirects=False,
+            )
+        except Exception as e:
+            last_exc = e
+            time.sleep(1.5 * (attempt + 1))
+    raise last_exc
+# ================= TLS 重试辅助 END =================
+
+# ================= Sentinel 辅助 =================
+def _build_sentinel_for_session(
+    session: Any,
+    did: str,
+    *,
+    proxies: Any,
+    impersonate: str = "chrome131",
+    retries: int = 3,
+) -> Tuple[str, str]:
+    """获取 Sentinel token，失败时重试，返回 (sentinel_header_str, token)。"""
+    last_exc: Optional[Exception] = None
+    for attempt in range(retries):
+        try:
+            imp = impersonate if attempt == 0 else random.choice([f["impersonate"] for f in _BROWSER_FINGERPRINTS])
+            sen_resp = requests.post(
+                "https://sentinel.openai.com/backend-api/sentinel/req",
+                headers={"origin": "https://sentinel.openai.com", "content-type": "text/plain;charset=UTF-8"},
+                data=f'{{"p":"","id":"{did}","flow":"authorize_continue"}}',
+                proxies=proxies,
+                impersonate=imp,
+                verify=_ssl_verify(),
+                timeout=15,
+            )
+            if sen_resp.status_code != 200:
+                raise RuntimeError(f"Sentinel HTTP {sen_resp.status_code}: {sen_resp.text[:200]!r}")
+            token = sen_resp.json()["token"]
+            sentinel = f'{{"p": "", "t": "", "c": "{token}", "id": "{did}", "flow": "authorize_continue"}}'
+            return sentinel, token
+        except Exception as e:
+            last_exc = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"Sentinel 重试失败: {last_exc}")
+# ================= Sentinel 辅助 END =================
+
+# ================= 重定向链追踪 =================
+def _follow_redirect_chain(
+    session: Any,
+    start_url: str,
+    *,
+    proxies: Any,
+    impersonate: str = "chrome131",
+    max_hops: int = 20,
+    stop_on_code_param: bool = True,
+) -> str:
+    """跟踪 HTTP 3xx + meta-refresh 重定向链，返回最终落地 URL。"""
+    current = start_url
+    for _ in range(max_hops):
+        try:
+            resp = session.get(
+                current,
+                allow_redirects=False,
+                proxies=proxies,
+                verify=_ssl_verify(),
+                timeout=15,
+                impersonate=impersonate,
+            )
+        except Exception:
+            break
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("Location") or ""
+            nxt = urllib.parse.urljoin(current, loc)
+        elif resp.status_code == 200:
+            mm = re.search(r'content=["\']\d+;\s*url=([^"\']+)["\']', resp.text, re.IGNORECASE)
+            nxt = urllib.parse.urljoin(current, mm.group(1)) if mm else ""
+            if not nxt:
+                break
+        else:
+            break
+        if stop_on_code_param and "code=" in nxt and "state=" in nxt:
+            return nxt
+        current = nxt
+        time.sleep(0.3)
+    return current
+# ================= 重定向链追踪 END =================
+
 def get_email_and_token(proxies: Any = None) -> tuple:
-    """兼容三模式的邮箱获取逻辑 (支持多域名随机轮换)"""
     mail_proxies = proxies if USE_PROXY_FOR_EMAIL else None
     letters = ''.join(random.choices(string.ascii_lowercase, k=5))
     digits = ''.join(random.choices(string.digits, k=random.randint(1, 3)))
     suffix = ''.join(random.choices(string.ascii_lowercase, k=random.randint(1, 3)))
     prefix = letters + digits + suffix
-    
+
     if EMAIL_API_MODE == "freemail":
         headers = {"Authorization": f"Bearer {FREEMAIL_API_TOKEN}", "Content-Type": "application/json"}
-        # 获取可用域名列表，随机选择一个后缀
         domain_index = 0
         try:
             domains_res = requests.get(
@@ -167,7 +290,6 @@ def get_email_and_token(proxies: Any = None) -> tuple:
                 time.sleep(2)
         return None, None
 
-    # IMAP + Gmail → 用 Gmail + 别名格式: user+RANDOM@gmail.com
     if EMAIL_API_MODE in ["imap"]:
         if IMAP_SERVER.lower() == "imap.gmail.com" and IMAP_USER and "@" in IMAP_USER:
             gmail_base = IMAP_USER.split("@")[0]
@@ -177,17 +299,18 @@ def get_email_and_token(proxies: Any = None) -> tuple:
         else:
             domain_list = [d.strip() for d in MAIL_DOMAINS.split(",") if d.strip()]
             if not domain_list:
-                print(f"[{ts()}] [ERROR] MAIL_DOMAINS 配置为空，无法生成邮箱！")
+                print(f"[{ts()}] [ERROR] MAIL_DOMAINS 配置为空！")
                 return None, None
             selected_domain = random.choice(domain_list)
             email_str = f"{prefix}@{selected_domain}"
             print(f"[{ts()}] [INFO] 成功生成临时域名邮箱: {email_str}")
             return email_str, ""
 
-
+    # cloudflare_temp_email
+    domain_list = [d.strip() for d in MAIL_DOMAINS.split(",") if d.strip()]
+    selected_domain = random.choice(domain_list) if domain_list else "example.com"
     headers = {"x-admin-auth": ADMIN_AUTH, "Content-Type": "application/json"}
     body = {"enablePrefix": False, "name": prefix, "domain": selected_domain}
-    
     for attempt in range(5):
         try:
             res = requests.post(
@@ -207,7 +330,6 @@ def get_email_and_token(proxies: Any = None) -> tuple:
         except Exception as e:
             print(f"[{ts()}] [ERROR] 邮箱注册网络异常，准备重试: {e}")
             time.sleep(2)
-            
     return None, None
 
 def _decode_mime_header(value: str) -> str:
@@ -258,13 +380,10 @@ def _extract_mail_fields(mail: dict) -> dict:
             if parsed_body: body_text = f"{body_text}\n{parsed_body}".strip() if body_text else parsed_body
         except Exception:
             body_text = f"{body_text}\n{raw}".strip() if body_text else raw
-
     body_text = unescape(re.sub(r"<[^>]+>", " ", body_text))
     return {"sender": sender, "subject": subject, "body": body_text, "raw": raw}
 
-
 def _extract_otp_code(content: str) -> str:
-    """提取验证码的增强正则"""
     if not content: return ""
     patterns = [
         r"(?i)Your ChatGPT code is\s*(\d{6})",
@@ -295,13 +414,13 @@ class ProxiedIMAP4_SSL(imaplib.IMAP4_SSL):
         return sock
 
 def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_ids: set = None, pattern: str = OTP_CODE_PATTERN, resend_fn=None, resend_after: int = 20) -> str:
-    """基于 Mail ID 过滤的验证码提取 (支持 JWT 或 Admin 双重鉴权)"""
     mail_proxies = proxies if USE_PROXY_FOR_EMAIL else None
     base_url = GPTMAIL_BASE.rstrip('/')
     print(f"[{ts()}] [INFO] 等待接收验证码 ({email}) ", end="", flush=True)
 
     if processed_mail_ids is None:
         processed_mail_ids = set()
+
     def create_imap_conn():
         if USE_PROXY_FOR_EMAIL and DEFAULT_PROXY and IMAP_SERVER.lower() == "imap.gmail.com":
             try:
@@ -310,16 +429,13 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
             except ImportError:
                 print(f"\n[{ts()}] [WARNING] 未安装 pysocks，回退到直连。")
                 return imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT, timeout=15)
-            
             print(f"\n[{ts()}] [INFO] 正在为 IMAP 注入底层代理穿透...")
             try:
                 parsed = urlparse(DEFAULT_PROXY)
                 proxy_host = parsed.hostname
                 proxy_port = parsed.port or 80
                 proxy_type = socks.HTTP if parsed.scheme.lower() in ['http', 'https'] else socks.SOCKS5
-                
                 original_socket = socket.socket
-                
                 try:
                     socks.set_default_proxy(proxy_type, proxy_host, proxy_port)
                     socket.socket = socks.socksocket
@@ -327,12 +443,12 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                     return conn
                 finally:
                     socket.socket = original_socket
-                    
             except Exception as e:
                 print(f"\n[{ts()}] [ERROR] IMAP 代理注入失败: {e}，尝试回退到直连。")
                 return imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT, timeout=15)
         else:
             return imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT, timeout=15)
+
     mail_conn = None
     if EMAIL_API_MODE == "imap":
         try:
@@ -344,7 +460,6 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
             mail_conn = None
 
     for attempt in range(60):
-        # 等待 resend_after 次后自动触发重发验证码
         if resend_fn and attempt == resend_after:
             try:
                 print(f"\n[{ts()}] [INFO] 验证码等待超时，自动触发重新发送...")
@@ -364,30 +479,25 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
 
                 folders_to_check = ['INBOX', '"[Gmail]/Spam"']
                 found_in_loop = False
-                
                 for folder in folders_to_check:
                     try:
                         status, _ = mail_conn.select(folder, readonly=True)
                         if status != 'OK': continue
                         search_query = f'(FROM "openai.com" TO "{email}")'
                         status, messages = mail_conn.search(None, search_query)
-                        
                         if status == 'OK' and messages[0]:
                             mail_ids = messages[0].split()
                             latest_id = mail_ids[-1]
-                            
                             if latest_id not in processed_mail_ids:
                                 res, data = mail_conn.fetch(latest_id, '(RFC822)')
                                 for response_part in data:
                                     if isinstance(response_part, tuple):
                                         msg = email_lib.message_from_bytes(response_part[1])
-                                        
                                         subject = str(msg.get("Subject", ""))
                                         if "=?UTF-8?" in subject:
                                             from email.header import decode_header
                                             dh = decode_header(subject)
                                             subject = "".join([str(t[0].decode(t[1] or 'utf-8') if isinstance(t[0], bytes) else t[0]) for t in dh])
-
                                         content = ""
                                         if msg.is_multipart():
                                             for part in msg.walk():
@@ -396,31 +506,27 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                                                     except: pass
                                         else:
                                             content = msg.get_payload(decode=True).decode('utf-8', 'ignore')
-                                        
                                         code = _extract_otp_code(f"{subject}\n{content}")
                                         if code:
                                             processed_mail_ids.add(latest_id)
                                             print(f"\n[{ts()}] [SUCCESS] 验证码: {code}")
-                                            try:
-                                                mail_conn.logout()
-                                            except Exception:
-                                                pass
+                                            try: mail_conn.logout()
+                                            except Exception: pass
                                             return code
                                         else:
                                             processed_mail_ids.add(latest_id)
-                            
                             found_in_loop = True
                             break
-                    except imaplib.IMAP4.abort as e:
+                    except imaplib.IMAP4.abort:
                         print(f"\n[{ts()}] [WARNING] IMAP 连接断开，将在下次循环重连...")
                         mail_conn = None
                         break
                     except Exception as e:
                         if "Spam" in folder:
                             print(f"\n[{ts()}] [DEBUG] 访问垃圾箱失败: {e}")
-                
                 if not found_in_loop:
                     print(".", end="", flush=True)
+
             elif EMAIL_API_MODE == "freemail":
                 headers = {"Authorization": f"Bearer {FREEMAIL_API_TOKEN}", "Content-Type": "application/json"}
                 res = requests.get(
@@ -429,7 +535,6 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                     headers=headers,
                     proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
                 )
-
                 if res.status_code == 200:
                     emails_list = res.json()
                     if isinstance(emails_list, list) and emails_list:
@@ -437,9 +542,7 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                             mail_id = mail.get("id")
                             if not mail_id or mail_id in processed_mail_ids:
                                 continue
-                            
                             code = str(mail.get("verification_code") or "")
-                            
                             if not code:
                                 content = str(mail.get("subject") or "")
                                 detail_res = requests.get(
@@ -455,7 +558,6 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                                         str(detail.get("html_content") or ""),
                                     ]))
                                 code = _extract_otp_code(content)
-                            
                             if code:
                                 processed_mail_ids.add(mail_id)
                                 print(f" 提取成功: {code}")
@@ -475,25 +577,20 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                         headers={"x-admin-auth": ADMIN_AUTH},
                         proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
                     )
-                
                 if res.status_code != 200:
                     print(f"\n[{ts()}] [ERROR] 邮箱接口请求失败 (HTTP {res.status_code}): {res.text}")
                     time.sleep(3)
                     continue
-
                 results = res.json().get("results")
                 if results and len(results) > 0:
                     for mail in results:
                         mail_id = mail.get("id")
                         if not mail_id or mail_id in processed_mail_ids:
                             continue
-
                         parsed = _extract_mail_fields(mail)
                         content = f"{parsed['subject']}\n{parsed['body']}".strip()
-
                         if "openai" not in parsed["sender"].lower() and "openai" not in content.lower():
                             continue
-
                         match = re.search(pattern, content)
                         if match:
                             code = match.group(1)
@@ -505,7 +602,6 @@ def get_oai_code(email: str, jwt: str = "", proxies: Any = None, processed_mail_
                     print(".", end="", flush=True)
         except Exception as e:
             print(".", end="", flush=True)
-
         time.sleep(3)
 
     print(f"\n[{ts()}] [ERROR] 接收验证码超时")
@@ -567,22 +663,18 @@ def _to_int(v: Any) -> int:
 def _post_form(url: str, data: Dict[str, str], proxies: Any = None, timeout: int = 30) -> Dict[str, Any]:
     try:
         resp = requests.post(
-            url, 
-            data=data, 
+            url, data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
-            proxies=proxies,
-            verify=_ssl_verify(),
-            timeout=timeout,
-            impersonate="chrome110"
+            proxies=proxies, verify=_ssl_verify(), timeout=timeout, impersonate="chrome131"
         )
-        if resp.status_code != 200: 
+        if resp.status_code != 200:
             raise RuntimeError(f"token exchange failed: {resp.status_code}: {resp.text}")
         return resp.json()
     except Exception as exc:
         raise RuntimeError(f"token exchange request failed: {exc}") from exc
 
 def _post_with_retry(
-    session: requests.Session, url: str, *, headers: Dict[str, Any], data: Any = None,
+    session: Any, url: str, *, headers: Dict[str, Any], data: Any = None,
     json_body: Any = None, proxies: Any = None, timeout: int = 30, retries: int = 2
 ) -> Any:
     last_error: Optional[Exception] = None
@@ -615,27 +707,22 @@ def submit_callback_url(*, callback_url: str, expected_state: str, code_verifier
     if not cb["code"]: raise ValueError("callback url missing ?code=")
     if not cb["state"]: raise ValueError("callback url missing ?state=")
     if cb["state"] != expected_state: raise ValueError("state mismatch")
-    
     token_resp = _post_form(
-        TOKEN_URL, 
-        {"grant_type": "authorization_code", "client_id": CLIENT_ID, "code": cb["code"], "redirect_uri": redirect_uri, "code_verifier": code_verifier}, 
+        TOKEN_URL,
+        {"grant_type": "authorization_code", "client_id": CLIENT_ID, "code": cb["code"], "redirect_uri": redirect_uri, "code_verifier": code_verifier},
         proxies=proxies
     )
-
     access_token = (token_resp.get("access_token") or "").strip()
     refresh_token = (token_resp.get("refresh_token") or "").strip()
     id_token = (token_resp.get("id_token") or "").strip()
     expires_in = _to_int(token_resp.get("expires_in"))
-
     claims = _jwt_claims_no_verify(id_token)
     email = str(claims.get("email") or "").strip()
     auth_claims = claims.get("https://api.openai.com/auth") or {}
     account_id = str(auth_claims.get("chatgpt_account_id") or "").strip()
-
     now = int(time.time())
     expired_rfc3339 = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + max(expires_in, 0)))
     now_rfc3339 = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
-
     config = {
         "id_token": id_token, "access_token": access_token, "refresh_token": refresh_token,
         "account_id": account_id, "last_refresh": now_rfc3339, "email": email,
@@ -664,34 +751,37 @@ FIRST_NAMES = [
 ]
 
 def generate_random_user_info() -> dict:
-    """生成随机用户信息 (18-45岁)"""
     name = random.choice(FIRST_NAMES)
     current_year = datetime.now().year
     birth_year = random.randint(current_year - 45, current_year - 18)
     birth_month = random.randint(1, 12)
-    
     if birth_month in [1, 3, 5, 7, 8, 10, 12]:
         birth_day = random.randint(1, 31)
     elif birth_month in [4, 6, 9, 11]:
         birth_day = random.randint(1, 30)
     else:
         birth_day = random.randint(1, 28)
-
     birthdate = f"{birth_year}-{birth_month:02d}-{birth_day:02d}"
+    return {"name": name, "birthdate": birthdate}
 
-    return {
-        "name": name,
-        "birthdate": birthdate
-    }
-
+# =====================================================================
+# run() — 新版：集成指纹池 / TLS重试 / Sentinel重试 / 重定向链追踪
+# =====================================================================
 def run(proxy: Optional[str]) -> tuple:
-    processed_mails = set()
+    processed_mails: set = set()
     proxies = {"http": proxy, "https": proxy} if proxy else None
-    s = requests.Session(proxies=proxies, impersonate="chrome110")
+
+    # 随机选指纹
+    fp = _choose_browser_fingerprint()
+    imp = fp["impersonate"]
+    print(f"[{ts()}] [INFO] 本次使用浏览器指纹: {imp}")
+
+    s = requests.Session(proxies=proxies, impersonate=imp)
+    _apply_session_fingerprint(s, fp)
 
     if not _skip_net_check():
         try:
-            trace = s.get("https://cloudflare.com/cdn-cgi/trace", proxies=proxies, verify=_ssl_verify(), timeout=10).text
+            trace = s.get("https://cloudflare.com/cdn-cgi/trace", proxies=proxies, verify=_ssl_verify(), timeout=10, impersonate=imp).text
             loc = (re.search(r"^loc=(.+)$", trace, re.MULTILINE) or [None, None])[1]
             if loc in ("CN", "HK"): raise RuntimeError("当前代理所在地不支持 OpenAI 服务 (CN/HK)")
             print(f"[{ts()}] [INFO] 代理节点检测通过 (所在地: {loc})")
@@ -704,28 +794,14 @@ def run(proxy: Optional[str]) -> tuple:
 
     oauth = generate_oauth_url()
     try:
-        s.get(oauth.auth_url, proxies=proxies, verify=True, timeout=15)
-        did = s.cookies.get("oai-did")
+        # ---- Step1: 访问 OAuth 授权页，获取 oai-did ----
+        _session_get_with_tls_retry(s, oauth.auth_url, proxies=proxies, timeout=15, impersonate=imp)
+        did = s.cookies.get("oai-did") or ""
 
-        sen_resp = requests.post(
-            "https://sentinel.openai.com/backend-api/sentinel/req",
-            headers={"origin": "https://sentinel.openai.com", "content-type": "text/plain;charset=UTF-8"},
-            data=f'{{"p":"","id":"{did}","flow":"authorize_continue"}}',
-            proxies=proxies, impersonate="chrome110", verify=_ssl_verify(), timeout=15
-        )
-        print(f"[DEBUG] Sentinel status={sen_resp.status_code}, body={sen_resp.text[:300]}")
+        # ---- Step2: 获取 Sentinel token（带重试）----
+        sentinel, _ = _build_sentinel_for_session(s, did, proxies=proxies, impersonate=imp)
 
-        if sen_resp.status_code != 200:
-            print(f"[{ts()}] [ERROR] Sentinel 风控校验失败 (HTTP {sen_resp.status_code})")
-            return None, None
-
-        try:
-            _sen_token = sen_resp.json()["token"]
-        except Exception:
-            print(f"[{ts()}] [ERROR] Sentinel token 解析失败 (body={sen_resp.text[:200]!r})")
-            return None, None
-        sentinel = f'{{"p": "", "t": "", "c": "{_sen_token}", "id": "{did}", "flow": "authorize_continue"}}'
-
+        # ---- Step3: 提交注册 email ----
         signup_resp = s.post(
             "https://auth.openai.com/api/accounts/authorize/continue",
             headers={"openai-sentinel-token": sentinel, "content-type": "application/json"},
@@ -733,12 +809,13 @@ def run(proxy: Optional[str]) -> tuple:
             proxies=proxies, verify=_ssl_verify()
         )
         if signup_resp.status_code == 403:
-            print(f"[{ts()}] [WARNING] 注册请求触发 403 拦截，稍作等待后重试...")
+            print(f"[{ts()}] [WARNING] 注册请求触发 403 拦截")
             return "retry_403", None
         elif signup_resp.status_code != 200:
-            print(f"[{ts()}] [ERROR] 注册表单提交失败，中断当前流程")
+            print(f"[{ts()}] [ERROR] 注册表单提交失败: HTTP {signup_resp.status_code}")
             return None, None
 
+        # ---- Step4: 提交密码 ----
         password = _generate_password()
         print(f"[{ts()}] [INFO] 提交注册信息 (密码: {password[:4]}****)")
         pwd_resp = s.post(
@@ -751,6 +828,7 @@ def run(proxy: Optional[str]) -> tuple:
             print(f"[{ts()}] [ERROR] 密码注册环节异常: {pwd_resp.text}")
             return None, None
 
+        # ---- Step5: OTP（如需要）----
         try:
             reg_json = pwd_resp.json()
             need_otp = "verify" in reg_json.get("continue_url", "") or "otp" in (reg_json.get("page") or {}).get("type", "")
@@ -760,376 +838,176 @@ def run(proxy: Optional[str]) -> tuple:
         if need_otp:
             otp_url = pwd_resp.json().get("continue_url", "")
             if otp_url:
-                _post_with_retry(s, otp_url if otp_url.startswith("http") else f"https://auth.openai.com{otp_url}", headers={"openai-sentinel-token": sentinel, "content-type": "application/json"}, json_body={}, proxies=proxies, timeout=30)
-            
+                _post_with_retry(s, otp_url if otp_url.startswith("http") else f"https://auth.openai.com{otp_url}",
+                    headers={"openai-sentinel-token": sentinel, "content-type": "application/json"}, json_body={}, proxies=proxies, timeout=30)
             code = get_oai_code(email, jwt=email_jwt, proxies=proxies, processed_mail_ids=processed_mails,
                 resend_fn=lambda: _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/resend",
-                    headers={"openai-sentinel-token": sentinel, "content-type": "application/json"},
-                    json_body={}, proxies=proxies))
+                    headers={"openai-sentinel-token": sentinel, "content-type": "application/json"}, json_body={}, proxies=proxies))
             if not code: return None, None
-            
-            code_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/validate", headers={"openai-sentinel-token": sentinel, "content-type": "application/json"}, json_body={"code": code}, proxies=proxies)
+            code_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/validate",
+                headers={"openai-sentinel-token": sentinel, "content-type": "application/json"}, json_body={"code": code}, proxies=proxies)
             if code_resp.status_code != 200:
                 print(f"[{ts()}] [ERROR] 验证码校验未通过: {code_resp.text}")
                 return None, None
 
+        # ---- Step6: create_account ----
         user_info = generate_random_user_info()
-        print(f"[{ts()}] [INFO] 初始化账户基础信息 (昵称: {user_info['name']}, 生日: {user_info['birthdate']})...")
-        create_account_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/create_account", headers={"content-type": "application/json"}, data=json.dumps(user_info), proxies=proxies)
-        
-        if create_account_resp.status_code != 200:
-            print(f"[{ts()}] [ERROR] 账户创建受阻: {create_account_resp.text}")
+        print(f"[{ts()}] [INFO] 初始化账户信息 (昵称: {user_info['name']}, 生日: {user_info['birthdate']})")
+        ca_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/create_account",
+            headers={"content-type": "application/json"}, data=json.dumps(user_info), proxies=proxies)
+        if ca_resp.status_code != 200:
+            print(f"[{ts()}] [ERROR] 账户创建受阻: {ca_resp.text}")
             return None, None
 
+        # ---- Step7: 二次 OAuth 登录（重新获取 workspace）----
         print(f"[{ts()}] [INFO] 基础信息建立完毕，执行静默风控重登录...")
         s.cookies.clear()
-        
-        oauth = generate_oauth_url()
-        try:
-            s.get(oauth.auth_url, proxies=proxies, verify=True, timeout=15)
-            new_did = s.cookies.get("oai-did")
-            sen_resp2 = requests.post("https://sentinel.openai.com/backend-api/sentinel/req",headers={"origin": "https://sentinel.openai.com", "content-type": "text/plain;charset=UTF-8"},data=f'{{"p":"","id":"{new_did}","flow":"authorize_continue"}}',proxies=proxies, impersonate="chrome110", verify=_ssl_verify(), timeout=15)
+        oauth2 = generate_oauth_url()
+        # 重新选指纹
+        fp2 = _choose_browser_fingerprint()
+        imp2 = fp2["impersonate"]
+        _session_get_with_tls_retry(s, oauth2.auth_url, proxies=proxies, timeout=15, impersonate=imp2)
+        did2 = s.cookies.get("oai-did") or ""
+        sentinel2, _ = _build_sentinel_for_session(s, did2, proxies=proxies, impersonate=imp2)
 
-            print(f"[DEBUG] Sentinel2 status={sen_resp2.status_code}, body={sen_resp2.text[:300]}")
-            try:
-                sen_token2 = sen_resp2.json().get("token", "")
-            except Exception:
-                print(f"[{ts()}] [ERROR] Sentinel2 token 解析失败 (body={sen_resp2.text[:200]!r})")
+        s.post("https://auth.openai.com/api/accounts/authorize/continue",
+            headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"},
+            data=f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"login"}}',
+            proxies=proxies, verify=_ssl_verify())
+        pwd_login_resp = s.post("https://auth.openai.com/api/accounts/password/verify",
+            headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"},
+            json={"password": password}, proxies=proxies, verify=_ssl_verify())
+
+        pwd_json = pwd_login_resp.json() if pwd_login_resp.status_code == 200 else {}
+        _page_type2 = pwd_json.get("page", {}).get("type", "")
+        _cu2 = str(pwd_json.get("continue_url") or "").strip()
+        print(f"[{ts()}] [INFO] 二次登录: status={pwd_login_resp.status_code}, page={_page_type2!r}, continue_url={_cu2!r}")
+
+        # about_you 补充
+        if _page_type2 == "about_you" or "about-you" in _cu2.lower():
+            print(f"[{ts()}] [INFO] 检测到 about-you 步骤，补充提交...")
+            _post_with_retry(s, "https://auth.openai.com/api/accounts/create_account",
+                headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"},
+                data=json.dumps(user_info), proxies=proxies, timeout=30)
+
+        # OTP 二次
+        if _page_type2 == "email_otp_verification" or "verify" in _cu2:
+            code2 = get_oai_code(email, jwt=email_jwt, proxies=proxies, processed_mail_ids=processed_mails,
+                resend_fn=lambda: _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/resend",
+                    headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"}, json_body={}, proxies=proxies))
+            if not code2: return None, None
+            c2r = _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/validate",
+                headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"}, json_body={"code": code2}, proxies=proxies)
+            if c2r.status_code != 200:
+                print(f"[{ts()}] [ERROR] 二次 OTP 校验失败: {c2r.text}")
                 return None, None
-            sentinel2 = f'{{"p": "", "t": "", "c": "{sen_token2}", "id": "{new_did}", "flow": "authorize_continue"}}'
+            c2j = c2r.json()
+            _page_type2 = c2j.get("page", {}).get("type", "")
+            _cu2 = str(c2j.get("continue_url") or "").strip()
 
-            s.post("https://auth.openai.com/api/accounts/authorize/continue", headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"}, data=f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"login"}}', proxies=proxies, verify=_ssl_verify())
-            pwd_login_resp = s.post("https://auth.openai.com/api/accounts/password/verify", headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"}, json={"password": password}, proxies=proxies, verify=_ssl_verify())
+        # add_phone 跳过
+        if _page_type2 == "add_phone" or "add-phone" in _cu2.lower():
+            print(f"[{ts()}] [INFO] 检测到 add_phone，尝试跳过...")
+            skip_r = _post_with_retry(s, "https://auth.openai.com/api/accounts/phone-number/skip",
+                headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"}, json_body={}, proxies=proxies)
+            print(f"[{ts()}] [INFO] phone skip HTTP {skip_r.status_code}")
+            if skip_r.status_code not in [200, 204]:
+                print(f"[{ts()}] [ERROR] 无法跳过手机验证，放弃")
+                return None, None
+            try:
+                sk_j = skip_r.json() if skip_r.text.strip() else {}
+                _cu2 = str(sk_j.get("continue_url") or "").strip()
+            except Exception:
+                pass
 
-            pwd_json = pwd_login_resp.json() if pwd_login_resp.status_code == 200 else {}
-            if pwd_json.get("page", {}).get("type", "") == "email_otp_verification" or "verify" in str(pwd_json.get("continue_url", "")):
-                code2 = get_oai_code(email, jwt=email_jwt, proxies=proxies, processed_mail_ids=processed_mails,
-                    resend_fn=lambda: _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/resend",
-                        headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"},
-                        json_body={}, proxies=proxies))
-                if not code2: return None, None
-                code2_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/validate", headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"}, json_body={"code": code2}, proxies=proxies)
-                if code2_resp.status_code != 200:
-                    print(f"[{ts()}] [ERROR] 二次安全验证 OTP 校验失败: {code2_resp.text}")
-                    return None, None
-            # 无论是否触发 OTP，跟进非 OTP 的 continue_url 以完成 session 建立
-            _cu2 = str(pwd_json.get("continue_url") or "").strip()
-            print(f"[DEBUG] pwd_login status={pwd_login_resp.status_code}, continue_url={_cu2!r}, page_type={pwd_json.get('page',{}).get('type','')!r}")
-            _page_type2 = pwd_json.get("page", {}).get("type", "")
-            if _cu2 and "otp" not in _cu2.lower() and "verify" not in _cu2.lower():
-                try:
-                    if "about-you" in _cu2.lower() or _page_type2 == "about_you":
-                        print(f"[{ts()}] [INFO] 检测到 about-you 步骤，补充提交用户信息...")
-                        _au_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/create_account",
-                            headers={"openai-sentinel-token": sentinel2, "content-type": "application/json"},
-                            data=json.dumps(user_info), proxies=proxies, timeout=30)
-                        print(f"[{ts()}] [INFO] about-you create_account: HTTP {_au_resp.status_code}")
-                        # 重新生成 OAuth 状态 + 完整第三次登录，确保 workspace 正确挂载
-                        try:
-                            s.cookies.clear()
-                            oauth3 = generate_oauth_url()
-                            s.get(oauth3.auth_url, proxies=proxies, verify=True, timeout=15)
-                            _did3 = s.cookies.get("oai-did") or new_did
-                            _s3r = requests.post(
-                                "https://sentinel.openai.com/backend-api/sentinel/req",
-                                headers={"origin": "https://sentinel.openai.com", "content-type": "text/plain;charset=UTF-8"},
-                                data=f'{{"p":"","id":"{_did3}","flow":"authorize_continue"}}',
-                                proxies=proxies, impersonate="chrome110", verify=_ssl_verify(), timeout=15)
-                            _s3t = _s3r.json().get("token", "")
-                            _s3 = f'{{"p": "", "t": "", "c": "{_s3t}", "id": "{_did3}", "flow": "authorize_continue"}}'
-                            s.post("https://auth.openai.com/api/accounts/authorize/continue",
-                                headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                data=f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"login"}}',
-                                proxies=proxies, verify=_ssl_verify())
-                            _r3 = s.post("https://auth.openai.com/api/accounts/password/verify",
-                                headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                json={"password": password}, proxies=proxies, verify=_ssl_verify())
-                            _r3j = {} 
-                            try:
-                                _r3j = _r3.json()
-                            except Exception: pass
-                            _r3_page = _r3j.get("page", {}).get("type", "")
-                            print(f"[{ts()}] [INFO] 第三次登录: status={_r3.status_code}, page_type={_r3_page!r}")
-                            if _r3_page == "about_you":
-                                # 第三次登录仍是 about_you → 尝试 POST about-you 专属端点
-                                print(f"[{ts()}] [WARNING] 第三次登录仍是 about_you，尝试专属端点...")
-                                _au2_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/about-you",
-                                    headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                    json_body={"name": user_info["name"], "birthdate": user_info["birthdate"]}, proxies=proxies)
-                                print(f"[{ts()}] [INFO] about-you endpoint: HTTP {_au2_resp.status_code}")
-                                # 再次 password/verify
-                                _r3b = s.post("https://auth.openai.com/api/accounts/password/verify",
-                                    headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                    json={"password": password}, proxies=proxies, verify=_ssl_verify())
-                                try:
-                                    _r3j = _r3b.json()
-                                    _r3_page = _r3j.get("page", {}).get("type", "")
-                                    print(f"[{ts()}] [INFO] 第三次登录(重试): status={_r3b.status_code}, page_type={_r3_page!r}")
-                                except Exception: pass
-                            if _r3_page == "email_otp_verification" or "verify" in str(_r3j.get("continue_url", "")):
-                                _c3 = get_oai_code(email, jwt=email_jwt, proxies=proxies, processed_mail_ids=processed_mails,
-                                    resend_fn=lambda: _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/resend",
-                                        headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                        json_body={}, proxies=proxies))
-                                if _c3:
-                                    _c3r = _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/validate",
-                                        headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                        json_body={"code": _c3}, proxies=proxies)
-                                    print(f"[{ts()}] [INFO] 第三次 OTP 验证: HTTP {_c3r.status_code}")
-                                    _c3j = _c3r.json() if _c3r.status_code == 200 else {}
-                                    print(f"[{ts()}] [INFO] 第三次 OTP resp page={_c3j.get('page',{}).get('type','')!r} continue_url={str(_c3j.get('continue_url',''))!r}")
-                                    # add_phone → 尝试跳过手机验证
-                                    if _c3j.get("page", {}).get("type", "") == "add_phone" or "add-phone" in str(_c3j.get("continue_url", "")).lower():
-                                        print(f"[{ts()}] [INFO] 检测到 add_phone，尝试跳过手机验证...")
-                                        _skip_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/phone-number/skip",
-                                            headers={"openai-sentinel-token": _s3, "content-type": "application/json"},
-                                            json_body={}, proxies=proxies)
-                                        print(f"[{ts()}] [INFO] phone skip HTTP {_skip_resp.status_code}")
-                                        if _skip_resp.status_code not in [200, 204]:
-                                            print(f"[{ts()}] [ERROR] 无法跳过手机验证，放弃")
-                                            return None, None
-                                        # skip 成功 → 解析 skip resp continue_url 并跟进 OAuth 链
-                                        try:
-                                            _sk3j = _skip_resp.json() if _skip_resp.text.strip() else {}
-                                            _sk3_cu = str(_sk3j.get("continue_url") or "").strip()
-                                            print(f"[{ts()}] [INFO] skip resp continue_url={_sk3_cu!r}")
-                                            if _sk3_cu:
-                                                _sk3_u = _sk3_cu if _sk3_cu.startswith("http") else f"https://auth.openai.com{_sk3_cu}"
-                                                for _ in range(15):
-                                                    _sk3f = s.get(_sk3_u, allow_redirects=False, proxies=proxies, verify=_ssl_verify(), timeout=15)
-                                                    if _sk3f.status_code in [301,302,303,307,308]:
-                                                        _sk3_u = urllib.parse.urljoin(_sk3_u, _sk3f.headers.get("Location") or "")
-                                                    elif _sk3f.status_code == 200:
-                                                        _sk3mm = re.search(r'content=["\']\ d+;\s*url=([^"\']+)["\']', _sk3f.text, re.IGNORECASE)
-                                                        _sk3_u = urllib.parse.urljoin(_sk3_u, _sk3mm.group(1)) if _sk3mm else ""
-                                                        if not _sk3_u: break
-                                                    else: break
-                                                    if "code=" in _sk3_u and "state=" in _sk3_u:
-                                                        print(f"[{ts()}] [INFO] skip→OAuth 回调成功")
-                                                        return submit_callback_url(callback_url=_sk3_u, code_verifier=oauth3.code_verifier, redirect_uri=oauth3.redirect_uri, expected_state=oauth3.state, proxies=proxies), password
-                                                    time.sleep(0.3)
-                                        except Exception as _sk3e:
-                                            print(f"[{ts()}] [WARNING] skip followup 失败: {_sk3e}")
-                            # 读取更新后的 auth_cookie 并尝试 workspace/select
-                            _ac3 = s.cookies.get("oai-client-auth-session")
-                            if _ac3:
-                                _seg3 = _ac3.split(".")
-                                _aj3 = _decode_jwt_segment(_seg3[1]) if len(_seg3) >= 2 else {}
-                                if not _aj3.get("workspaces"): _aj3 = _decode_jwt_segment(_seg3[0])
-                                _wid3 = str((_aj3.get("workspaces") or [{}])[0].get("id", "")).strip()
-                                print(f"[{ts()}] [INFO] 第三次登录 workspace_id={_wid3!r}")
-                                if _wid3:
-                                    _sel3 = _post_with_retry(s, "https://auth.openai.com/api/accounts/workspace/select",
-                                        headers={"content-type": "application/json"},
-                                        data=f'{{"workspace_id":"{_wid3}"}}', proxies=proxies)
-                                    try:
-                                        _cur3 = str((_sel3.json() or {}).get("continue_url", "")).strip()
-                                        if _cur3:
-                                            _cu3 = _cur3 if _cur3.startswith("http") else f"https://auth.openai.com{_cur3}"
-                                            for _ in range(15):
-                                                _f3 = s.get(_cu3, allow_redirects=False, proxies=proxies, verify=_ssl_verify(), timeout=15)
-                                                if _f3.status_code in [301,302,303,307,308]:
-                                                    _n3 = urllib.parse.urljoin(_cu3, _f3.headers.get("Location") or "")
-                                                elif _f3.status_code == 200:
-                                                    _mm3 = re.search(r'content=["\']\ d+;\s*url=([^"\']+)["\']', _f3.text, re.IGNORECASE)
-                                                    _n3 = urllib.parse.urljoin(_cu3, _mm3.group(1)) if _mm3 else ""
-                                                    if not _n3: break
-                                                else: break
-                                                if "code=" in _n3 and "state=" in _n3:
-                                                    print(f"[{ts()}] [INFO] 第三次登录成功获得 OAuth 回调")
-                                                    return submit_callback_url(callback_url=_n3, code_verifier=oauth3.code_verifier, redirect_uri=oauth3.redirect_uri, expected_state=oauth3.state, proxies=proxies), password
-                                                _cu3 = _n3
-                                                time.sleep(0.3)
-                                    except Exception as _se3:
-                                        print(f"[{ts()}] [WARNING] 第三次 workspace/select 失败: {_se3}")
-                        except Exception as _ae:
-                            print(f"[{ts()}] [WARNING] about-you 第三次完整登录失败: {_ae}")
-                    else:
-                        _cu2_full = _cu2 if _cu2.startswith("http") else f"https://auth.openai.com{_cu2}"
-                        _post_with_retry(s, _cu2_full, headers={"content-type": "application/json"}, json_body={}, proxies=proxies, timeout=30)
-                        print(f"[{ts()}] [INFO] 已跟进登录 continue_url: {_cu2_full}")
-                except Exception as _e:
-                    print(f"[{ts()}] [WARNING] 跟进 continue_url 失败（可忽略）: {_e}")
-        except Exception as e:
-            print(f"[{ts()}] [ERROR] 风控重登录流程发生异常: {e}")
-            return None, None
+        # 如果 continue_url 已含 code= → 直接换 token
+        if _cu2 and "code=" in _cu2 and "state=" in _cu2:
+            return submit_callback_url(callback_url=_cu2, code_verifier=oauth2.code_verifier,
+                redirect_uri=oauth2.redirect_uri, expected_state=oauth2.state, proxies=proxies), password
 
+        # ---- Step8: 读取 workspace_id ----
         auth_cookie = s.cookies.get("oai-client-auth-session")
-        if not auth_cookie:
-            print(f"[{ts()}] [ERROR] 授权 Token 获取失败")
-            return None, None
+        workspace_id = ""
+        if auth_cookie:
+            segs = auth_cookie.split(".")
+            aj = _decode_jwt_segment(segs[1]) if len(segs) >= 2 else {}
+            if not aj.get("workspaces"): aj = _decode_jwt_segment(segs[0])
+            workspace_id = str((aj.get("workspaces") or [{}])[0].get("id", "")).strip()
+        print(f"[{ts()}] [INFO] workspace_id={workspace_id!r}")
 
-        segments = auth_cookie.split(".")
-        auth_json = _decode_jwt_segment(segments[1]) if len(segments) >= 2 else {}
-        if not auth_json.get("workspaces"): auth_json = _decode_jwt_segment(segments[0])
-        
-        workspace_id = str((auth_json.get("workspaces") or [{}])[0].get("id", "")).strip()
-        print(f"[DEBUG] workspace_id={workspace_id!r}, auth_json_keys={list(auth_json.keys())}")
-        # workspace_id 为空时兜底：重新走完整第三次 OAuth 流程
+        # workspace_id 为空 → 第三次完整 OAuth 兜底
         if not workspace_id:
             print(f"[{ts()}] [WARNING] workspace_id 为空，尝试第三次完整 OAuth 兜底登录...")
-            try:
-                s.cookies.clear()
-                oauth_fb = generate_oauth_url()
-                s.get(oauth_fb.auth_url, proxies=proxies, verify=True, timeout=15)
-                _did_fb = s.cookies.get("oai-did") or ""
-                _sfb_r = requests.post(
-                    "https://sentinel.openai.com/backend-api/sentinel/req",
-                    headers={"origin": "https://sentinel.openai.com", "content-type": "text/plain;charset=UTF-8"},
-                    data=f'{{"p":"","id":"{_did_fb}","flow":"authorize_continue"}}',
-                    proxies=proxies, impersonate="chrome110", verify=_ssl_verify(), timeout=15)
-                _sfb_t = _sfb_r.json().get("token", "")
-                _sfb = f'{{"p": "", "t": "", "c": "{_sfb_t}", "id": "{_did_fb}", "flow": "authorize_continue"}}'
-                s.post("https://auth.openai.com/api/accounts/authorize/continue",
-                    headers={"openai-sentinel-token": _sfb, "content-type": "application/json"},
-                    data=f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"login"}}',
-                    proxies=proxies, verify=_ssl_verify())
-                _rfb = s.post("https://auth.openai.com/api/accounts/password/verify",
-                    headers={"openai-sentinel-token": _sfb, "content-type": "application/json"},
-                    json={"password": password}, proxies=proxies, verify=_ssl_verify())
-                _rfbj = {}
-                try:
-                    _rfbj = _rfb.json() if _rfb.status_code == 200 else {}
-                except Exception: pass
-                _rfb_page = _rfbj.get("page", {}).get("type", "")
-                print(f"[{ts()}] [INFO] 兜底登录: status={_rfb.status_code}, page_type={_rfb_page!r}")
-                if _rfb_page == "email_otp_verification" or "verify" in str(_rfbj.get("continue_url", "")):
-                    _cfb = get_oai_code(email, jwt=email_jwt, proxies=proxies, processed_mail_ids=processed_mails,
-                        resend_fn=lambda: _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/resend",
-                            headers={"openai-sentinel-token": _sfb, "content-type": "application/json"},
-                            json_body={}, proxies=proxies))
-                    if _cfb:
-                        _cfbr = _post_with_retry(s, "https://auth.openai.com/api/accounts/email-otp/validate",
-                            headers={"openai-sentinel-token": _sfb, "content-type": "application/json"},
-                            json_body={"code": _cfb}, proxies=proxies)
-                        print(f"[{ts()}] [INFO] 兜底 OTP: HTTP {_cfbr.status_code}")
-                        # 解析 OTP resp 并跟进 continue_url 完成 OAuth 链
-                        if _cfbr.status_code == 200:
-                            try:
-                                _cfbj = _cfbr.json()
-                                _cfb_page = _cfbj.get("page", {}).get("type", "")
-                                _cfb_cu = str(_cfbj.get("continue_url") or "").strip()
-                                print(f"[{ts()}] [INFO] 兜底 OTP resp page={_cfb_page!r} continue_url={_cfb_cu!r}")
-                                # add_phone → 尝试跳过手机验证
-                                if _cfb_page == "add_phone" or "add-phone" in _cfb_cu.lower():
-                                    print(f"[{ts()}] [INFO] 检测到 add_phone，尝试跳过手机验证...")
-                                    _skip_fb = _post_with_retry(s, "https://auth.openai.com/api/accounts/phone-number/skip",
-                                        headers={"openai-sentinel-token": _sfb, "content-type": "application/json"},
-                                        json_body={}, proxies=proxies)
-                                    print(f"[{ts()}] [INFO] phone skip HTTP {_skip_fb.status_code}")
-                                    # skip 成功 → 直接跟进 add-phone URL 或 workspace/select
-                                    try:
-                                        # skip body 可能为空，直接 GET add-phone page 找 OAuth 回调
-                                        _skfb_u = "https://auth.openai.com/add-phone"
-                                        try:
-                                            _skfbj = _skip_fb.json() if _skip_fb.text.strip() else {}
-                                            _skfb_cu2 = str(_skfbj.get("continue_url") or "").strip()
-                                            if _skfb_cu2:
-                                                _skfb_u = _skfb_cu2 if _skfb_cu2.startswith("http") else f"https://auth.openai.com{_skfb_cu2}"
-                                        except Exception: pass
-                                        print(f"[{ts()}] [INFO] skip 后跟进: {_skfb_u}")
-                                        for _ in range(15):
-                                            _skfbf = s.get(_skfb_u, allow_redirects=False, proxies=proxies, verify=_ssl_verify(), timeout=15)
-                                            print(f"[{ts()}] [DEBUG] skip redirect {_skfbf.status_code} → {_skfb_u[:80]}")
-                                            if _skfbf.status_code in [301,302,303,307,308]:
-                                                _skfb_u = urllib.parse.urljoin(_skfb_u, _skfbf.headers.get("Location") or "")
-                                            elif _skfbf.status_code == 200:
-                                                _skfbmm = re.search(r'content=["\']\ d+;\s*url=([^"\']+)["\']', _skfbf.text, re.IGNORECASE)
-                                                _skfb_u = urllib.parse.urljoin(_skfb_u, _skfbmm.group(1)) if _skfbmm else ""
-                                                if not _skfb_u: break
-                                            else: break
-                                            if "code=" in _skfb_u and "state=" in _skfb_u:
-                                                print(f"[{ts()}] [INFO] skip→OAuth 回调成功")
-                                                return submit_callback_url(callback_url=_skfb_u, code_verifier=oauth_fb.code_verifier, redirect_uri=oauth_fb.redirect_uri, expected_state=oauth_fb.state, proxies=proxies), password
-                                            time.sleep(0.3)
-                                    except Exception as _skfbe:
-                                        print(f"[{ts()}] [WARNING] skip followup 失败: {_skfbe}")
-                                    if _skip_fb.status_code not in [200, 204]:
-                                        print(f"[{ts()}] [ERROR] 无法跳过手机验证，放弃")
-                                        return None, None
-                                if _cfb_cu and "add-phone" not in _cfb_cu.lower():
-                                    _cfb_url = _cfb_cu if _cfb_cu.startswith("http") else f"https://auth.openai.com{_cfb_cu}"
-                                    for _ in range(15):
-                                        _cf2 = s.get(_cfb_url, allow_redirects=False, proxies=proxies, verify=_ssl_verify(), timeout=15)
-                                        if _cf2.status_code in [301,302,303,307,308]:
-                                            _cfb_next = urllib.parse.urljoin(_cfb_url, _cf2.headers.get("Location") or "")
-                                        elif _cf2.status_code == 200:
-                                            _mm2 = re.search(r'content=["\']\ d+;\s*url=([^"\']+)["\']', _cf2.text, re.IGNORECASE)
-                                            _cfb_next = urllib.parse.urljoin(_cfb_url, _mm2.group(1)) if _mm2 else ""
-                                            if not _cfb_next: break
-                                        else: break
-                                        if "code=" in _cfb_next and "state=" in _cfb_next:
-                                            print(f"[{ts()}] [INFO] 兜底 OTP continue_url 获得 OAuth 回调")
-                                            return submit_callback_url(callback_url=_cfb_next, code_verifier=oauth_fb.code_verifier, redirect_uri=oauth_fb.redirect_uri, expected_state=oauth_fb.state, proxies=proxies), password
-                                        _cfb_url = _cfb_next
-                                        time.sleep(0.3)
-                            except Exception as _cfbe:
-                                print(f"[{ts()}] [WARNING] 兜底 OTP continue_url 跟进失败: {_cfbe}")
-                # 重新读取 auth_cookie 和 workspace_id
-                _ac_fb = s.cookies.get("oai-client-auth-session")
-                if _ac_fb:
-                    _seg_fb = _ac_fb.split(".")
-                    _aj_fb = _decode_jwt_segment(_seg_fb[1]) if len(_seg_fb) >= 2 else {}
-                    if not _aj_fb.get("workspaces"): _aj_fb = _decode_jwt_segment(_seg_fb[0])
-                    workspace_id = str((_aj_fb.get("workspaces") or [{}])[0].get("id", "")).strip()
-                    print(f"[{ts()}] [INFO] 兜底登录 workspace_id={workspace_id!r}")
-                    if workspace_id:
-                        auth_cookie = _ac_fb
-                        _sel_fb = _post_with_retry(s, "https://auth.openai.com/api/accounts/workspace/select",
-                            headers={"content-type": "application/json"},
-                            data=f'{{"workspace_id":"{workspace_id}"}}', proxies=proxies)
-                        try:
-                            _cu_fb = str((_sel_fb.json() or {}).get("continue_url", "")).strip()
-                            if _cu_fb:
-                                _u_fb = _cu_fb if _cu_fb.startswith("http") else f"https://auth.openai.com{_cu_fb}"
-                                for _ in range(15):
-                                    _f_fb = s.get(_u_fb, allow_redirects=False, proxies=proxies, verify=_ssl_verify(), timeout=15)
-                                    if _f_fb.status_code in [301,302,303,307,308]:
-                                        _n_fb = urllib.parse.urljoin(_u_fb, _f_fb.headers.get("Location") or "")
-                                    elif _f_fb.status_code == 200:
-                                        _mm_fb = re.search(r'content=["\']\ d+;\s*url=([^"\']+)["\']', _f_fb.text, re.IGNORECASE)
-                                        _n_fb = urllib.parse.urljoin(_u_fb, _mm_fb.group(1)) if _mm_fb else ""
-                                        if not _n_fb: break
-                                    else: break
-                                    if "code=" in _n_fb and "state=" in _n_fb:
-                                        print(f"[{ts()}] [INFO] 兜底登录获得 OAuth 回调")
-                                        return submit_callback_url(callback_url=_n_fb, code_verifier=oauth_fb.code_verifier, redirect_uri=oauth_fb.redirect_uri, expected_state=oauth_fb.state, proxies=proxies), password
-                                    _u_fb = _n_fb
-                                    time.sleep(0.3)
-                        except Exception as _fe:
-                            print(f"[{ts()}] [WARNING] 兜底 workspace/select 失败: {_fe}")
-            except Exception as _fbe:
-                print(f"[{ts()}] [WARNING] 兜底登录流程失败: {_fbe}")
-        # workspace/select 加重试，被 CF 拦截返回 HTML 时等待后重试
+            s.cookies.clear()
+            oauth3 = generate_oauth_url()
+            fp3 = _choose_browser_fingerprint()
+            imp3 = fp3["impersonate"]
+            _session_get_with_tls_retry(s, oauth3.auth_url, proxies=proxies, timeout=15, impersonate=imp3)
+            did3 = s.cookies.get("oai-did") or ""
+            sentinel3, _ = _build_sentinel_for_session(s, did3, proxies=proxies, impersonate=imp3)
+            s.post("https://auth.openai.com/api/accounts/authorize/continue",
+                headers={"openai-sentinel-token": sentinel3, "content-type": "application/json"},
+                data=f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"login"}}',
+                proxies=proxies, verify=_ssl_verify())
+            r3 = s.post("https://auth.openai.com/api/accounts/password/verify",
+                headers={"openai-sentinel-token": sentinel3, "content-type": "application/json"},
+                json={"password": password}, proxies=proxies, verify=_ssl_verify())
+            r3j = r3.json() if r3.status_code == 200 else {}
+            _pt3 = r3j.get("page", {}).get("type", "")
+            _cu3 = str(r3j.get("continue_url") or "").strip()
+            print(f"[{ts()}] [INFO] 兜底登录: status={r3.status_code}, page={_pt3!r}")
+
+            # add_phone 兜底跳过
+            if _pt3 == "add_phone" or "add-phone" in _cu3.lower():
+                sk3 = _post_with_retry(s, "https://auth.openai.com/api/accounts/phone-number/skip",
+                    headers={"openai-sentinel-token": sentinel3, "content-type": "application/json"}, json_body={}, proxies=proxies)
+                if sk3.status_code in [200, 204]:
+                    try:
+                        sk3j = sk3.json() if sk3.text.strip() else {}
+                        _cu3 = str(sk3j.get("continue_url") or "").strip()
+                    except Exception: pass
+
+            if _cu3 and "code=" in _cu3 and "state=" in _cu3:
+                return submit_callback_url(callback_url=_cu3, code_verifier=oauth3.code_verifier,
+                    redirect_uri=oauth3.redirect_uri, expected_state=oauth3.state, proxies=proxies), password
+
+            # 兜底：重定向链追踪
+            ac3 = s.cookies.get("oai-client-auth-session")
+            if ac3:
+                sg3 = ac3.split(".")
+                aj3 = _decode_jwt_segment(sg3[1]) if len(sg3) >= 2 else {}
+                if not aj3.get("workspaces"): aj3 = _decode_jwt_segment(sg3[0])
+                workspace_id = str((aj3.get("workspaces") or [{}])[0].get("id", "")).strip()
+                oauth = oauth3  # 换用 oauth3 的 code_verifier
+                if workspace_id:
+                    auth_cookie = ac3
+
+            if not workspace_id:
+                print(f"[{ts()}] [ERROR] 三次登录均未取到 workspace_id，放弃")
+                return None, None
+
+        # ---- Step9: workspace/select + 重定向链 → OAuth 回调 ----
         current_url = ""
         for _sel_attempt in range(4):
-            select_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/workspace/select", headers={"content-type": "application/json"}, data=f'{{"workspace_id":"{workspace_id}"}}', proxies=proxies)
+            sel_resp = _post_with_retry(s, "https://auth.openai.com/api/accounts/workspace/select",
+                headers={"content-type": "application/json"},
+                data=f'{{"workspace_id":"{workspace_id}"}}', proxies=proxies)
             try:
-                current_url = str((select_resp.json() or {}).get("continue_url", "")).strip()
+                current_url = str((sel_resp.json() or {}).get("continue_url", "")).strip()
                 break
             except Exception:
-                _body_preview = select_resp.text[:120]
-                print(f"[{ts()}] [WARNING] workspace/select 返回非 JSON (尝试 {_sel_attempt+1}/4), body={_body_preview!r}")
+                print(f"[{ts()}] [WARNING] workspace/select 返回非 JSON (尝试 {_sel_attempt+1}/4)")
                 if _sel_attempt < 3:
                     time.sleep(15 * (_sel_attempt + 1))
                 else:
-                    print(f"[{ts()}] [ERROR] workspace/select 持续被拦截，放弃本次注册")
+                    print(f"[{ts()}] [ERROR] workspace/select 持续被拦截，放弃")
                     return None, None
-        for _ in range(15):
-            f_resp = s.get(current_url, allow_redirects=False, proxies=proxies, verify=_ssl_verify(), timeout=15)
-            if f_resp.status_code in [301, 302, 303, 307, 308]:
-                next_url = urllib.parse.urljoin(current_url, f_resp.headers.get("Location") or "")
-            elif f_resp.status_code == 200:
-                meta_match = re.search(r'content=["\']\d+;\s*url=([^"\']+)["\']', f_resp.text, re.IGNORECASE)
-                next_url = urllib.parse.urljoin(current_url, meta_match.group(1)) if meta_match else ""
-                if not next_url: break
-            else: break
 
-            if "code=" in next_url and "state=" in next_url:
-                return submit_callback_url(callback_url=next_url, code_verifier=oauth.code_verifier, redirect_uri=oauth.redirect_uri, expected_state=oauth.state, proxies=proxies), password
-                
-            current_url = next_url
-            time.sleep(0.5)
+        if current_url:
+            final_url = _follow_redirect_chain(s, current_url, proxies=proxies, impersonate=imp2)
+            if "code=" in final_url and "state=" in final_url:
+                return submit_callback_url(callback_url=final_url, code_verifier=oauth.code_verifier,
+                    redirect_uri=oauth.redirect_uri, expected_state=oauth.state, proxies=proxies), password
 
         print(f"[{ts()}] [ERROR] OAuth 授权链路追踪失败")
         return None, None
@@ -1138,6 +1016,9 @@ def run(proxy: Optional[str]) -> tuple:
         print(f"[{ts()}] [ERROR] 注册主流程发生严重异常: {e}")
         return None, None
 
+# =====================================================================
+# CPA / 本地工具函数（原版保留）
+# =====================================================================
 def _normalize_cpa_auth_files_url(api_url: str) -> str:
     normalized = (api_url or "").strip().rstrip("/")
     lower_url = normalized.lower()
@@ -1156,7 +1037,6 @@ def upload_to_cpa_integrated(token_data: dict, api_url: str, api_token: str) -> 
         mime.addpart(name="file", data=file_content, filename=filename, content_type="application/json")
         response = requests.post(upload_url, multipart=mime, headers={"Authorization": f"Bearer {api_token}"}, timeout=30, impersonate="chrome110")
         if response.status_code in (200, 201): return True, "上传成功"
-        
         if response.status_code in (404, 405, 415):
             raw_upload_url = f"{upload_url}?name={urllib.parse.quote(filename)}"
             fallback_res = requests.post(raw_upload_url, data=file_content, headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}, timeout=30, impersonate="chrome110")
@@ -1199,7 +1079,6 @@ def _extract_rate_limit_reason(rate_info: Any, key: str, min_remaining_weekly_pe
         label_map = {"rate_limit": "周限额已耗尽", "code_review_rate_limit": "代码审查周限额已耗尽"}
         label = label_map.get(key, f"{key} 已耗尽")
         return f"{label}（allowed={allowed}, limit_reached={limit_reached}）"
-
     if key == "rate_limit" and min_remaining_weekly_percent > 0:
         remaining_percent = _extract_remaining_percent(rate_info.get("primary_window"))
         if remaining_percent is not None and remaining_percent < min_remaining_weekly_percent:
@@ -1208,26 +1087,21 @@ def _extract_rate_limit_reason(rate_info: Any, key: str, min_remaining_weekly_pe
 
 def _extract_cliproxy_failure_reason(payload: Any, min_remaining_weekly_percent: int = 0) -> Optional[str]:
     data = _decode_possible_json_payload(payload)
-
     if isinstance(data, str):
         for keyword in ("usage_limit_reached", "account_deactivated", "insufficient_quota", "invalid_api_key", "unsupported_region"):
             if keyword in data: return _format_known_cliproxy_error(keyword)
         return None
-
     if not isinstance(data, dict): return None
-
     error = data.get("error")
     if isinstance(error, dict):
         err_type = error.get("type")
         if err_type: return _format_known_cliproxy_error(err_type)
         message = error.get("message")
         if message: return str(message)
-
     for key in ("rate_limit", "code_review_rate_limit"):
         min_remaining_percent = min_remaining_weekly_percent if key == "rate_limit" else 0
         reason = _extract_rate_limit_reason(data.get(key), key, min_remaining_percent)
         if reason: return reason
-
     additional_rate_limits = data.get("additional_rate_limits")
     if isinstance(additional_rate_limits, list):
         for index, rate_info in enumerate(additional_rate_limits):
@@ -1237,30 +1111,26 @@ def _extract_cliproxy_failure_reason(payload: Any, min_remaining_weekly_percent:
         for key, rate_info in additional_rate_limits.items():
             reason = _extract_rate_limit_reason(rate_info, f"additional_rate_limits.{key}", 0)
             if reason: return reason
-
     for key in ("data", "body", "response", "text", "content", "status_message"):
         reason = _extract_cliproxy_failure_reason(data.get(key), min_remaining_weekly_percent)
         if reason: return reason
-
     data_str = json.dumps(data, ensure_ascii=False)
     for keyword in ("usage_limit_reached", "account_deactivated", "insufficient_quota", "invalid_api_key", "unsupported_region"):
         if keyword in data_str: return _format_known_cliproxy_error(keyword)
-
     return None
-# ----------------------------------------
 
 def test_cliproxy_auth_file(item: dict, api_url: str, api_token: str) -> Tuple[bool, str]:
     auth_index = item.get("auth_index")
     base_url = api_url.strip().rstrip("/")
     call_url = base_url.replace("/auth-files", "/api-call") if "/auth-files" in base_url else f"{base_url}/v0/management/api-call"
     payload = {
-        "authIndex": auth_index, 
-        "method": "GET", 
-        "url": "https://chatgpt.com/backend-api/wham/usage", 
+        "authIndex": auth_index,
+        "method": "GET",
+        "url": "https://chatgpt.com/backend-api/wham/usage",
         "header": {
-            "Authorization": "Bearer $TOKEN$", 
-            "Content-Type": "application/json", 
-            "User-Agent": DEFAULT_CLIPROXY_UA, 
+            "Authorization": "Bearer $TOKEN$",
+            "Content-Type": "application/json",
+            "User-Agent": DEFAULT_CLIPROXY_UA,
             "Chatgpt-Account-Id": str(item.get("account_id") or "")
         }
     }
@@ -1268,39 +1138,30 @@ def test_cliproxy_auth_file(item: dict, api_url: str, api_token: str) -> Tuple[b
         resp = requests.post(call_url, headers={"Authorization": f"Bearer {api_token}"}, json=payload, timeout=60, impersonate="chrome110")
         if resp.status_code != 200:
             return False, f"HTTP {resp.status_code}"
-            
         data = resp.json()
         status_code = data.get("status_code", 0)
-        
         failure_reason = _extract_cliproxy_failure_reason(data, MIN_REMAINING_WEEKLY_PERCENT)
-        
         if status_code >= 400 or failure_reason:
             return False, failure_reason or f"HTTP {status_code}"
-            
         return True, "正常"
-    except Exception: 
+    except Exception:
         return False, "测活超时"
 
 async def cpa_main_loop(args):
-    """CPA 智能仓管模式 (测活、清理、补货、上传一体化)"""
     print("=" * 60)
     print(f"   目标库存阈值: {MIN_ACCOUNTS_THRESHOLD} | 单次补发量: {BATCH_REG_COUNT}")
-    print(f"   周限额剔除规则: 剩余低于 {MIN_REMAINING_WEEKLY_PERCENT}%" if MIN_REMAINING_WEEKLY_PERCENT > 0 else "  ⚖️  周限额剔除规则: 完全耗尽才剔除")
+    print(f"   周限额剔除规则: 剩余低于 {MIN_REMAINING_WEEKLY_PERCENT}%" if MIN_REMAINING_WEEKLY_PERCENT > 0 else "   周限额剔除规则: 完全耗尽才剔除")
     print("=" * 60)
-    
     loop = asyncio.get_running_loop()
-
     while True:
         print(f"\n[{ts()}] [INFO] 开始执行仓库例行巡检与测活...")
         try:
             res = requests.get(
-                _normalize_cpa_auth_files_url(CPA_API_URL), 
-                headers={"Authorization": f"Bearer {CPA_API_TOKEN}"}, 
-                timeout=20
+                _normalize_cpa_auth_files_url(CPA_API_URL),
+                headers={"Authorization": f"Bearer {CPA_API_TOKEN}"}, timeout=20
             )
             all_files = res.json().get("files", [])
             codex_files = [f for f in all_files if "codex" in str(f.get("type","")).lower() or "codex" in str(f.get("provider","")).lower()]
-            
             valid_count = 0
             for i, item in enumerate(codex_files, 1):
                 name = item.get("name")
@@ -1311,74 +1172,58 @@ async def cpa_main_loop(args):
                 else:
                     print(f"[{ts()}] [WARNING] 测活 [{i}/{len(codex_files)}]: 凭证 {name} 失效({msg})，正在物理剔除...")
                     requests.delete(
-                        _normalize_cpa_auth_files_url(CPA_API_URL), 
-                        headers={"Authorization": f"Bearer {CPA_API_TOKEN}"}, 
+                        _normalize_cpa_auth_files_url(CPA_API_URL),
+                        headers={"Authorization": f"Bearer {CPA_API_TOKEN}"},
                         params={"name": name}
                     )
-
             print(f"[{ts()}] [INFO] 巡检结束，当前仓库有效数: {valid_count}")
-
             if valid_count < MIN_ACCOUNTS_THRESHOLD:
                 print(f"[{ts()}] [INFO] 侦测到库存不足 (当前 {valid_count} < 阈值 {MIN_ACCOUNTS_THRESHOLD})，启动注册补货...")
                 for _ in range(BATCH_REG_COUNT):
                     result = await loop.run_in_executor(None, run, args.proxy)
-                    if not result:
-                        continue
-                    
+                    if not result: continue
                     token_json_str, password = result
                     if token_json_str == "retry_403":
                         print(f"[{ts()}] [WARNING] 检测到 403 频率限制，任务挂起 10 秒后重试...")
                         await asyncio.sleep(10)
                         continue
-                    
                     if token_json_str:
                         token_data = json.loads(token_json_str)
                         account_email = token_data.get('email', 'unknown')
                         fname_email = account_email.replace("@", "_")
-                        
                         base_dir = TOKEN_OUTPUT_DIR or "."
                         if base_dir != ".": os.makedirs(base_dir, exist_ok=True)
-
                         json_file_name = f"token_{fname_email}_{int(time.time())}.json"
                         json_path = os.path.join(base_dir, json_file_name)
                         with open(json_path, "w", encoding="utf-8") as f:
                             f.write(token_json_str)
                         print(f"[{ts()}] [SUCCESS] 本地 JSON 备份成功: {json_file_name}")
-
                         if account_email:
                             accounts_file = os.path.join(base_dir, "accounts.txt")
                             with open(accounts_file, "a", encoding="utf-8") as af:
                                 af.write(f"{account_email}----{password}\n")
                             print(f"[{ts()}] [SUCCESS] 账号密码已追加至本地 accounts.txt")
-                        
-                        # CPA 上传
                         success, up_msg = upload_to_cpa_integrated(token_data, CPA_API_URL, CPA_API_TOKEN)
                         if success:
                             print(f"[{ts()}] [SUCCESS] 补货凭证 {account_email} 云端上传成功！")
                         else:
                             print(f"[{ts()}] [ERROR] 云端上传失败: {up_msg}")
-                    
                     await asyncio.sleep(5)
             else:
                 print(f"[{ts()}] [INFO] 仓库存量充足，无需补发。")
-            
             print(f"[{ts()}] [INFO] 维护周期结束，{CHECK_INTERVAL_MINUTES} 分钟后进行下一次巡检...")
             await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
-
         except Exception as e:
             print(f"[{ts()}] [ERROR] 主循环异常: {e}")
             await asyncio.sleep(60)
 
 def normal_main_loop(args):
-    """常规模式 (纯量产注册，存本地)"""
     sleep_min = max(1, args.sleep_min)
     sleep_max = max(sleep_min, args.sleep_max)
     count = 0
-
     while True:
         count += 1
         print(f"\n[{ts()}] >>> 开始第 {count} 次量产注册任务 <<<")
-
         try:
             result = run(args.proxy)
             if not result:
@@ -1389,20 +1234,16 @@ def normal_main_loop(args):
                     print(f"[{ts()}] [WARNING] 检测到 403 频率限制，任务挂起 10 秒后重试...")
                     time.sleep(10)
                     continue
-
                 if token_json_str:
                     token_data = json.loads(token_json_str)
                     account_email = token_data.get("email", "unknown")
                     fname_email = account_email.replace("@", "_")
-
                     base_dir = TOKEN_OUTPUT_DIR or "."
                     if base_dir != ".": os.makedirs(base_dir, exist_ok=True)
-                    
                     file_name = os.path.join(base_dir, f"token_{fname_email}_{int(time.time())}.json")
                     with open(file_name, "w", encoding="utf-8") as f:
                         f.write(token_json_str)
                     print(f"[{ts()}] [SUCCESS] Token 凭证已生成: {file_name}")
-
                     if account_email and password:
                         accounts_file = os.path.join(base_dir, "accounts.txt")
                         with open(accounts_file, "a", encoding="utf-8") as af:
@@ -1410,29 +1251,27 @@ def normal_main_loop(args):
                         print(f"[{ts()}] [SUCCESS] 账户明文信息已归档: {accounts_file}")
                 else:
                     print(f"[{ts()}] [ERROR] ❌ 本次注册任务执行失败")
-
         except Exception as e:
             print(f"[{ts()}] [ERROR] 发生未捕获全局异常: {e}")
-
         if args.once:
             break
-
         wait_time = random.randint(sleep_min, sleep_max)
         print(f"[{ts()}] [INFO] 任务进入休眠，等待 {wait_time} 秒后继续...")
         time.sleep(wait_time)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenAI 自动注册 & CPA 检测一体")
-    parser.add_argument("--proxy", default=None, help="代理地址，如 http://127.0.0.1:7890")
-    parser.add_argument("--once", action="store_true", help="只运行一次 (常规模式下有效)")
-    parser.add_argument("--sleep-min", type=int, default=5, help="循环模式最短等待秒数")
-    parser.add_argument("--sleep-max", type=int, default=30, help="循环模式最长等待秒数")
+    parser.add_argument("--proxy", default=None)
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--sleep-min", type=int, default=5)
+    parser.add_argument("--sleep-max", type=int, default=30)
     args = parser.parse_args()
     args.proxy = DEFAULT_PROXY if DEFAULT_PROXY.strip() else None
     print("=" * 65)
     print("   OpenAI 无限注册 & CPA 智能仓管")
     print("   Author: (wenfxl)轩灵")
     print("   特性: 支持纯协议无限注册、周限额低于设定值|死号智能剔除、低于存货数自动补货")
+    print("   新增: 多浏览器指纹池随机切换 / TLS抖动重试 / Sentinel重试 / 重定向链追踪")
     print("-" * 65)
     if ENABLE_CPA_MODE:
         print("   当前状态: [ CPA 智能仓管模式 ] 已开启")
@@ -1441,7 +1280,6 @@ def main() -> None:
         print("   当前状态: [ 常规量产模式 ] 已开启")
         print("   行为逻辑: 纯净无限注册 -> 本地保存 (CPA 上传已关闭)")
     print("=" * 65)
-
     if ENABLE_CPA_MODE:
         try:
             asyncio.run(cpa_main_loop(args))
