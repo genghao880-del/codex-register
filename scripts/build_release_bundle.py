@@ -20,6 +20,7 @@ ASSET_ITEMS = [
     ("codex_register/gui_frontend_app_setup.js", "codex_register"),
     ("codex_register/gui_frontend_app_template.html", "codex_register"),
     ("README.md", "."),
+    ("LICENSE", "."),
     ("gui_config.example.json", "."),
     ("VERSION", "."),
     ("REPOSITORY", "."),

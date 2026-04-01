@@ -15,6 +15,7 @@ CodeX Register 是一个桌面化的 Web 控制台，用于统一管理注册流
 - [快速开始](#快速开始)
 - [界面说明](#界面说明)
 - [配置文件与安全](#配置文件与安全)
+- [使用协议](#使用协议)
 - [完整配置项](#完整配置项)
 - [Graph 账号文件格式](#graph-账号文件格式)
 - [SMS 管理策略](#sms-管理策略)
@@ -129,6 +130,15 @@ python gui.py --mode browser --no-auto-open
 - `.env`：可选，仅用于部分默认值补全。
 
 当前仓库 `.gitignore` 已忽略 `*.json`、`*.txt`、`gui_config.json`，可避免误提交多数敏感文件。
+
+## 使用协议
+
+- 作者：`Msg-Lbo`（GitHub: `https://github.com/Msg-Lbo`）。
+- 本项目采用仓库根目录 `LICENSE`（`CodeX Register 使用协议（非开源许可）`）。
+- 协议地址：`https://github.com/Msg-Lbo/codeX-register/blob/main/LICENSE`
+- 本项目仅用于学习研究，允许非商业使用与非商业二次开发自用。
+- 明确禁止：任何商业售卖、收费服务、以及二次开发后用于收费/变现。
+- 如需商业授权，请先取得作者书面许可。
 
 ## 完整配置项
 
